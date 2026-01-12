@@ -33,6 +33,13 @@ from yurtle_kanban.models import (
     WorkItemType,
 )
 from yurtle_kanban.service import KanbanService
+from yurtle_kanban.workflow import (
+    StateConfig,
+    TransitionRule,
+    WorkflowConfig,
+    WorkflowParser,
+    get_default_workflow,
+)
 
 __all__ = [
     # Config
@@ -46,4 +53,10 @@ __all__ = [
     "WorkItemType",
     # Service
     "KanbanService",
+    # Workflow
+    "StateConfig",
+    "TransitionRule",
+    "WorkflowConfig",
+    "WorkflowParser",
+    "get_default_workflow",
 ]

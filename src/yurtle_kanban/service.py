@@ -19,6 +19,7 @@ import yaml
 
 from .config import KanbanConfig
 from .models import Board, Column, Comment, WorkItem, WorkItemStatus, WorkItemType
+from .workflow import WorkflowParser, WorkflowConfig
 
 
 logger = logging.getLogger("yurtle-kanban")
@@ -32,6 +33,8 @@ class KanbanService:
         self.repo_root = repo_root
         self._items: dict[str, WorkItem] = {}
         self._board: Optional[Board] = None
+        self._workflow_parser = WorkflowParser(repo_root / ".kanban")
+        self._workflows: dict[str, WorkflowConfig] = {}
 
     def scan(self) -> list[WorkItem]:
         """Scan configured paths for work items."""
@@ -378,19 +381,28 @@ class KanbanService:
         new_status: WorkItemStatus,
         commit: bool = True,
         message: Optional[str] = None,
+        validate_workflow: bool = True,
     ) -> WorkItem:
-        """Move a work item to a new status."""
+        """Move a work item to a new status.
+
+        Args:
+            item_id: The work item ID to move
+            new_status: The target status
+            commit: Whether to git commit the change
+            message: Optional commit message
+            validate_workflow: Whether to validate against workflow rules
+        """
         item = self.get_item(item_id)
         if not item:
             raise ValueError(f"Item not found: {item_id}")
 
         old_status = item.status
 
-        # Validate transition
-        if not self._is_valid_transition(old_status, new_status):
-            raise ValueError(
-                f"Invalid transition from {old_status.value} to {new_status.value}"
-            )
+        # Validate transition using workflow if available
+        if validate_workflow:
+            valid, error_msg = self._validate_transition(item, new_status)
+            if not valid:
+                raise ValueError(error_msg)
 
         # Check WIP limits
         board = self.get_board()
@@ -418,10 +430,32 @@ class KanbanService:
 
         return item
 
+    def _validate_transition(
+        self, item: WorkItem, new_status: WorkItemStatus
+    ) -> tuple[bool, str]:
+        """Validate a status transition using workflow rules if available.
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        # Try to load workflow for this item type
+        item_type = item.item_type.value
+        workflow = self._workflow_parser.load_workflow(item_type)
+
+        if workflow:
+            # Use workflow validation
+            return self._workflow_parser.validate_transition(item, new_status, workflow)
+        else:
+            # Fall back to default validation
+            if self._is_valid_transition(item.status, new_status):
+                return True, ""
+            else:
+                return False, f"Invalid transition from {item.status.value} to {new_status.value}"
+
     def _is_valid_transition(
         self, from_status: WorkItemStatus, to_status: WorkItemStatus
     ) -> bool:
-        """Check if a status transition is valid."""
+        """Check if a status transition is valid (default rules)."""
         # Define valid transitions
         valid_transitions = {
             WorkItemStatus.BACKLOG: [WorkItemStatus.READY, WorkItemStatus.BLOCKED],
@@ -450,6 +484,32 @@ class KanbanService:
         }
 
         return to_status in valid_transitions.get(from_status, [])
+
+    def get_workflow(self, item_type: str) -> Optional[WorkflowConfig]:
+        """Get the workflow for a specific item type."""
+        return self._workflow_parser.load_workflow(item_type)
+
+    def get_allowed_transitions(self, item: WorkItem) -> list[str]:
+        """Get list of allowed transitions for an item."""
+        workflow = self._workflow_parser.load_workflow(item.item_type.value)
+        if workflow:
+            return workflow.get_allowed_transitions(item.status.value)
+        else:
+            # Default transitions
+            default = self._get_default_transitions(item.status)
+            return [s.value for s in default]
+
+    def _get_default_transitions(self, status: WorkItemStatus) -> list[WorkItemStatus]:
+        """Get default allowed transitions for a status."""
+        transitions = {
+            WorkItemStatus.BACKLOG: [WorkItemStatus.READY, WorkItemStatus.BLOCKED],
+            WorkItemStatus.READY: [WorkItemStatus.IN_PROGRESS, WorkItemStatus.BACKLOG, WorkItemStatus.BLOCKED],
+            WorkItemStatus.IN_PROGRESS: [WorkItemStatus.REVIEW, WorkItemStatus.DONE, WorkItemStatus.BLOCKED, WorkItemStatus.READY],
+            WorkItemStatus.REVIEW: [WorkItemStatus.DONE, WorkItemStatus.IN_PROGRESS, WorkItemStatus.BLOCKED],
+            WorkItemStatus.BLOCKED: [WorkItemStatus.READY, WorkItemStatus.IN_PROGRESS, WorkItemStatus.BACKLOG],
+            WorkItemStatus.DONE: [],
+        }
+        return transitions.get(status, [])
 
     def _update_item_file(self, item: WorkItem) -> None:
         """Update the work item file with current state."""
