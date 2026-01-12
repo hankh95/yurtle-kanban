@@ -22,24 +22,62 @@ yurtle-kanban    ->  This project: file-based workflow management
 nusy-nano        ->  Optional: neurosymbolic reasoning
 ```
 
-## Quick Start
+## Installation
 
 ```bash
 pip install yurtle-kanban
 
+# With MCP server support
+pip install yurtle-kanban[mcp]
+```
+
+## Quick Start
+
+```bash
 # Initialize in your project
 cd my-project
 yurtle-kanban init --theme software
 
-# Create a work item
-yurtle-kanban create feature "Add dark mode"
+# Create work items
+yurtle-kanban create feature "Add dark mode" --priority high
+yurtle-kanban create bug "Fix login error" --assignee dev-1
+
+# View the board
+yurtle-kanban board
 
 # List work items
 yurtle-kanban list
+yurtle-kanban list --status in_progress
+yurtle-kanban list --assignee dev-1
 
-# Move to done
+# Move items
+yurtle-kanban move FEAT-001 in_progress
 yurtle-kanban move FEAT-001 done
+
+# Show item details
+yurtle-kanban show FEAT-001
+
+# Export board
+yurtle-kanban export --format html --output board.html
+yurtle-kanban export --format markdown --output BOARD.md
+yurtle-kanban export --format json
 ```
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `init` | Initialize yurtle-kanban in current directory |
+| `list` | List work items with optional filters |
+| `create` | Create a new work item |
+| `move` | Move item to new status |
+| `show` | Show item details |
+| `board` | Display kanban board in terminal |
+| `stats` | Show board statistics |
+| `next` | Suggest next item to work on |
+| `blocked` | List blocked items |
+| `comment` | Add comment to item |
+| `export` | Export board to HTML/Markdown/JSON |
 
 ## Work Items as Files
 
@@ -47,50 +85,217 @@ Each work item is a markdown file with Yurtle blocks:
 
 ```markdown
 ---
+id: FEAT-042
 title: "Add dark mode support"
+type: feature
+status: in_progress
+priority: high
+assignee: dev-1
+created: 2026-01-12
+tags: [ui, accessibility]
 ---
 
 # Add Dark Mode Support
 
-Description goes here...
+Implement dark mode toggle in the settings panel.
+
+## Acceptance Criteria
+- [ ] Toggle in settings
+- [ ] Persists across sessions
+- [ ] Respects system preference
 
 ```yurtle
 @prefix kb: <https://yurtle.dev/kanban/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 <> a kb:Feature ;
    kb:id "FEAT-042" ;
    kb:status kb:in_progress ;
    kb:priority kb:high ;
-   kb:assignee <../team/developer-1.md> .
+   kb:assignee <../team/dev-1.md> ;
+   kb:created "2026-01-12"^^xsd:date ;
+   kb:tag "ui", "accessibility" .
+```
 ```
 
 The file IS the work item. `<>` refers to the file itself as an RDF subject.
 
-## Configurable Paths
-
-Work items can live anywhere in your repo:
+## Configuration
 
 ```yaml
 # .kanban/config.yaml
 kanban:
-  theme: software
+  theme: software   # or: nautical, custom
+
   paths:
-    root: work/           # Simple: all in one directory
-    # OR
-    features: specs/features/
-    bugs: specs/bugs/     # By type: separate directories
+    root: work/     # All items in one directory
+    # OR organize by type:
+    # features: specs/features/
+    # bugs: specs/bugs/
+
+  # Scan multiple directories
+  scan_paths:
+    - work/
+    - specs/
+    - docs/roadmap/
+
+  ignore:
+    - "**/archive/**"
+    - "**/templates/**"
 ```
 
 ## Themes
 
 **Software (default):**
-- Feature, Bug, Epic, Issue, Task
+```
+Feature (FEAT-), Bug (BUG-), Epic (EPIC-), Issue (ISSUE-), Task (TASK-), Idea (IDEA-)
+Columns: Backlog → Ready → In Progress → Review → Done
+```
 
 **Nautical:**
-- Expedition, Voyage, Directive, Hazard, Signal
+```
+Expedition (EXP-), Voyage (VOY-), Directive (DIR-), Hazard (HAZ-), Signal (SIG-)
+Columns: Harbor → Provisioning → Underway → Approaching → Arrived
+```
 
-**Custom:**
-- Define your own item types and workflows
+**Custom:** Define your own in `themes/my-theme.yaml`
+
+## MCP Server for AI Agents
+
+yurtle-kanban includes an MCP (Model Context Protocol) server for Claude Code and other AI agents:
+
+```bash
+# Start the MCP server
+yurtle-kanban-mcp
+```
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `kanban_list_items` | List items with optional filters |
+| `kanban_get_item` | Get item by ID |
+| `kanban_create_item` | Create new item |
+| `kanban_move_item` | Move item to new status |
+| `kanban_get_board` | Get full board state |
+| `kanban_get_my_items` | Get items for assignee |
+| `kanban_get_blocked` | Get blocked items |
+| `kanban_suggest_next` | Suggest next item to work on |
+| `kanban_add_comment` | Add comment to item |
+
+### Claude Code Integration
+
+Add to your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "kanban": {
+      "command": "yurtle-kanban-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+Then Claude can manage your kanban:
+
+```
+Agent: I'll check what I should work on next.
+[Calls: kanban_suggest_next()]
+
+Response: {
+  "suggestion": {"id": "FEAT-042", "title": "Add dark mode", "priority": "high"},
+  "message": "Suggested: FEAT-042 - Add dark mode"
+}
+
+Agent: Let me move that to in progress.
+[Calls: kanban_move_item(item_id="FEAT-042", new_status="in_progress")]
+
+Response: {
+  "success": true,
+  "message": "Moved FEAT-042 to in_progress"
+}
+```
+
+## Python API
+
+```python
+from pathlib import Path
+from yurtle_kanban import KanbanConfig, KanbanService, WorkItemType
+
+# Load config
+config = KanbanConfig.load(Path(".kanban/config.yaml"))
+service = KanbanService(config, Path.cwd())
+
+# List items
+items = service.get_items(status=WorkItemStatus.READY)
+
+# Create item
+item = service.create_item(
+    item_type=WorkItemType.FEATURE,
+    title="New feature",
+    priority="high",
+    assignee="dev-1",
+)
+
+# Move item
+service.move_item("FEAT-001", WorkItemStatus.DONE)
+
+# Get board
+board = service.get_board()
+for col in board.columns:
+    print(f"{col.name}: {len(board.get_items_by_status(col.id))} items")
+```
+
+## Export Formats
+
+### HTML (GitHub Pages compatible)
+```bash
+yurtle-kanban export --format html --output docs/board.html
+```
+Self-contained HTML with embedded CSS. Perfect for GitHub Pages.
+
+### Markdown
+```bash
+yurtle-kanban export --format markdown --output BOARD.md
+```
+Table format for embedding in README.
+
+### JSON
+```bash
+yurtle-kanban export --format json > board.json
+```
+For integrations and CI/CD.
+
+## GitHub Actions
+
+Auto-update board on push:
+
+```yaml
+# .github/workflows/kanban-board.yml
+name: Update Kanban Board
+on:
+  push:
+    paths:
+      - 'work/**/*.md'
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install yurtle-kanban
+      - run: yurtle-kanban export --format html --output docs/board.html
+      - run: |
+          git config user.name "github-actions[bot]"
+          git add docs/board.html
+          git commit -m "chore: update kanban board" || exit 0
+          git push
+```
 
 ## Why Keep Work Items in Your Project?
 
@@ -101,27 +306,14 @@ kanban:
 | No external dependency | No Jira outage blocks your workflow |
 | Offline-first | Works without internet |
 | AI agent access | Agents read/write work items like any file |
+| PR integration | Work item changes visible in pull requests |
 
-## MCP Integration
+## Related Projects
 
-yurtle-kanban provides an MCP server for AI agents:
-
-```python
-# Agents can use structured tools
-list_items(status="in_progress")
-move_item(id="FEAT-042", new_status="done")
-create_item(type="feature", title="New feature")
-```
-
-## Documentation
-
-- [Yurtle Specification](https://github.com/hankh95/yurtle)
-- [yurtle-rdflib](https://github.com/hankh95/yurtle-rdflib)
+- [Yurtle Specification](https://github.com/hankh95/yurtle) - Turtle RDF in Markdown
+- [yurtle-rdflib](https://github.com/hankh95/yurtle-rdflib) - RDFlib parser plugin
+- [nusy-nano](https://github.com/hankh95/nusy-nano) - Neurosymbolic reasoning
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-
-## Status
-
-**In Development** - Phase 1: Core Library

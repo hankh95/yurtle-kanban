@@ -55,6 +55,7 @@ mcp = [
 
 [project.scripts]
 yurtle-kanban = "yurtle_kanban.cli:main"
+yurtle-kanban-mcp = "yurtle_kanban.mcp.server:run_server"
 
 [project.urls]
 Homepage = "https://github.com/hankh95/yurtle-kanban"

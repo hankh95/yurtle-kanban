@@ -1,0 +1,308 @@
+"""
+Export functionality for yurtle-kanban.
+
+Provides export to:
+- HTML (standalone, GitHub Pages compatible)
+- Markdown (table format)
+- JSON (for integrations)
+"""
+
+import json
+from datetime import datetime
+from typing import Any
+
+from .models import Board, WorkItem, WorkItemStatus
+
+
+def export_html(board: Board) -> str:
+    """Export board to standalone HTML."""
+    # Group items by status
+    items_by_status: dict[str, list[WorkItem]] = {}
+    for col in board.columns:
+        try:
+            status = WorkItemStatus.from_string(col.id)
+            items_by_status[col.id] = board.get_items_by_status(status)
+        except ValueError:
+            items_by_status[col.id] = []
+
+    # Build HTML
+    columns_html = []
+    for col in board.columns:
+        items = items_by_status.get(col.id, [])
+        items_html = "\n".join(_render_html_card(item) for item in items)
+
+        wip_class = ""
+        wip_badge = ""
+        if col.wip_limit:
+            if len(items) > col.wip_limit:
+                wip_class = "wip-exceeded"
+            wip_badge = f'<span class="wip-badge">{len(items)}/{col.wip_limit}</span>'
+
+        columns_html.append(f"""
+        <div class="column {wip_class}">
+            <h2>{col.name} <span class="count">({len(items)})</span> {wip_badge}</h2>
+            <div class="cards">
+                {items_html or '<p class="empty">No items</p>'}
+            </div>
+        </div>
+        """)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{board.name}</title>
+    <style>
+        :root {{
+            --bg-color: #1a1a2e;
+            --card-bg: #16213e;
+            --text-color: #eee;
+            --border-color: #0f3460;
+            --accent-color: #e94560;
+        }}
+
+        * {{ box-sizing: border-box; }}
+
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+        }}
+
+        h1 {{
+            text-align: center;
+            margin-bottom: 30px;
+        }}
+
+        .board {{
+            display: flex;
+            gap: 20px;
+            overflow-x: auto;
+            padding-bottom: 20px;
+        }}
+
+        .column {{
+            flex: 0 0 300px;
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 15px;
+        }}
+
+        .column.wip-exceeded {{
+            border: 2px solid var(--accent-color);
+        }}
+
+        .column h2 {{
+            font-size: 1rem;
+            margin: 0 0 15px 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }}
+
+        .count {{
+            opacity: 0.6;
+            font-weight: normal;
+        }}
+
+        .wip-badge {{
+            background: var(--accent-color);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.8rem;
+            margin-left: 5px;
+        }}
+
+        .cards {{
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }}
+
+        .card {{
+            background: var(--bg-color);
+            border-radius: 6px;
+            padding: 12px;
+            border-left: 3px solid var(--border-color);
+        }}
+
+        .card.priority-critical {{ border-left-color: #ef4444; }}
+        .card.priority-high {{ border-left-color: #f59e0b; }}
+        .card.priority-medium {{ border-left-color: #3b82f6; }}
+        .card.priority-low {{ border-left-color: #6b7280; }}
+
+        .card-id {{
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 5px;
+        }}
+
+        .card-title {{
+            font-weight: 500;
+            margin-bottom: 8px;
+        }}
+
+        .card-meta {{
+            font-size: 0.8rem;
+            color: #888;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }}
+
+        .tag {{
+            background: var(--border-color);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }}
+
+        .empty {{
+            color: #666;
+            text-align: center;
+            padding: 20px;
+        }}
+
+        footer {{
+            text-align: center;
+            margin-top: 30px;
+            color: #666;
+            font-size: 0.8rem;
+        }}
+
+        @media (max-width: 768px) {{
+            .board {{
+                flex-direction: column;
+            }}
+            .column {{
+                flex: none;
+                width: 100%;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <h1>{board.name}</h1>
+
+    <div class="board">
+        {''.join(columns_html)}
+    </div>
+
+    <footer>
+        Generated by yurtle-kanban on {datetime.now().strftime('%Y-%m-%d %H:%M')}
+    </footer>
+</body>
+</html>"""
+
+
+def _render_html_card(item: WorkItem) -> str:
+    """Render a work item as an HTML card."""
+    tags_html = " ".join(f'<span class="tag">{tag}</span>' for tag in item.tags[:3])
+
+    return f"""
+    <div class="card priority-{item.priority or 'medium'}">
+        <div class="card-id">{item.item_type.value.upper()} {item.id}</div>
+        <div class="card-title">{item.title}</div>
+        <div class="card-meta">
+            {f'<span>@{item.assignee}</span>' if item.assignee else ''}
+            {tags_html}
+        </div>
+    </div>
+    """
+
+
+def export_markdown(board: Board) -> str:
+    """Export board to markdown table format."""
+    lines = [
+        f"# {board.name}",
+        "",
+        f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
+        "",
+    ]
+
+    # Create table header
+    header = "| " + " | ".join(col.name for col in board.columns) + " |"
+    separator = "| " + " | ".join("---" for _ in board.columns) + " |"
+
+    lines.append(header)
+    lines.append(separator)
+
+    # Group items by status
+    items_by_status: dict[str, list[WorkItem]] = {}
+    for col in board.columns:
+        try:
+            status = WorkItemStatus.from_string(col.id)
+            items_by_status[col.id] = board.get_items_by_status(status)
+        except ValueError:
+            items_by_status[col.id] = []
+
+    # Find max items
+    max_items = max(len(items) for items in items_by_status.values()) if items_by_status else 0
+
+    # Add rows
+    for i in range(max(max_items, 1)):
+        row = []
+        for col in board.columns:
+            items = items_by_status.get(col.id, [])
+            if i < len(items):
+                item = items[i]
+                row.append(f"**{item.id}** {item.title[:20]}...")
+            else:
+                row.append("")
+        lines.append("| " + " | ".join(row) + " |")
+
+    lines.append("")
+
+    # Add statistics
+    lines.append("## Statistics")
+    lines.append("")
+    lines.append("| Status | Count |")
+    lines.append("| --- | --- |")
+
+    counts = board.get_column_counts()
+    for col in board.columns:
+        count = counts.get(col.id, 0)
+        lines.append(f"| {col.name} | {count} |")
+
+    lines.append(f"| **Total** | **{sum(counts.values())}** |")
+
+    return "\n".join(lines)
+
+
+def export_json(board: Board) -> str:
+    """Export board to JSON format."""
+    data: dict[str, Any] = {
+        "board": {
+            "id": board.id,
+            "name": board.name,
+            "generated_at": datetime.now().isoformat(),
+        },
+        "columns": [],
+        "items": [],
+        "statistics": {},
+    }
+
+    # Add columns
+    for col in board.columns:
+        data["columns"].append({
+            "id": col.id,
+            "name": col.name,
+            "order": col.order,
+            "wip_limit": col.wip_limit,
+        })
+
+    # Add items
+    for item in board.items:
+        data["items"].append(item.to_dict())
+
+    # Add statistics
+    counts = board.get_column_counts()
+    data["statistics"] = {
+        "by_status": counts,
+        "total": sum(counts.values()),
+    }
+
+    return json.dumps(data, indent=2)

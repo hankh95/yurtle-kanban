@@ -2,11 +2,41 @@
 Configuration management for yurtle-kanban.
 """
 
+import importlib.resources
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
+
+
+# Cache for loaded themes
+_theme_cache: dict[str, dict[str, Any]] = {}
+
+
+def _load_builtin_theme(theme_name: str) -> Optional[dict[str, Any]]:
+    """Load a built-in theme from the package."""
+    if theme_name in _theme_cache:
+        return _theme_cache[theme_name]
+
+    try:
+        # Try to load from package resources
+        try:
+            import yurtle_kanban
+            package_dir = Path(yurtle_kanban.__file__).parent.parent.parent
+            theme_path = package_dir / "themes" / f"{theme_name}.yaml"
+        except Exception:
+            theme_path = Path(__file__).parent.parent.parent / "themes" / f"{theme_name}.yaml"
+
+        if theme_path.exists():
+            with open(theme_path) as f:
+                theme = yaml.safe_load(f)
+                _theme_cache[theme_name] = theme
+                return theme
+    except Exception:
+        pass
+
+    return None
 
 
 @dataclass
@@ -98,3 +128,7 @@ class KanbanConfig:
                 paths.append(Path(type_path))
 
         return paths
+
+    def get_theme(self) -> Optional[dict[str, Any]]:
+        """Get the theme configuration."""
+        return _load_builtin_theme(self.theme)

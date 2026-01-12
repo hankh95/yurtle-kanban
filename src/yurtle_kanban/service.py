@@ -1,0 +1,540 @@
+"""
+Kanban Service - Core operations for managing work items.
+
+This service provides the business logic for:
+- Loading/saving work items from Yurtle files
+- State transitions with validation
+- WIP limit enforcement
+- Item creation and updates
+"""
+
+import logging
+import re
+import subprocess
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any, Optional
+
+import yaml
+
+from .config import KanbanConfig
+from .models import Board, Column, Comment, WorkItem, WorkItemStatus, WorkItemType
+
+
+logger = logging.getLogger("yurtle-kanban")
+
+
+class KanbanService:
+    """Service for managing kanban work items."""
+
+    def __init__(self, config: KanbanConfig, repo_root: Path):
+        self.config = config
+        self.repo_root = repo_root
+        self._items: dict[str, WorkItem] = {}
+        self._board: Optional[Board] = None
+
+    def scan(self) -> list[WorkItem]:
+        """Scan configured paths for work items."""
+        self._items.clear()
+
+        for scan_path in self.config.get_work_paths():
+            full_path = self.repo_root / scan_path
+            if full_path.exists():
+                for item in self._scan_directory(full_path):
+                    self._items[item.id] = item
+
+        return list(self._items.values())
+
+    def _scan_directory(self, directory: Path) -> list[WorkItem]:
+        """Scan a directory for Yurtle work items."""
+        items = []
+
+        for md_file in directory.rglob("*.md"):
+            # Check ignore patterns
+            if self._should_ignore(md_file):
+                continue
+
+            item = self._parse_file(md_file)
+            if item:
+                items.append(item)
+
+        return items
+
+    def _should_ignore(self, path: Path) -> bool:
+        """Check if a path should be ignored."""
+        path_str = str(path.relative_to(self.repo_root))
+        for pattern in self.config.paths.ignore:
+            # Simple glob-style matching
+            if "**" in pattern:
+                pattern_part = pattern.replace("**", "").strip("/")
+                if pattern_part in path_str:
+                    return True
+            elif pattern.startswith("*"):
+                if path_str.endswith(pattern[1:]):
+                    return True
+        return False
+
+    def _parse_file(self, file_path: Path) -> Optional[WorkItem]:
+        """Parse a markdown file for work item data."""
+        try:
+            content = file_path.read_text()
+
+            # Parse frontmatter
+            frontmatter = self._parse_frontmatter(content)
+            if not frontmatter:
+                return None
+
+            # Get required fields
+            item_id = frontmatter.get("id")
+            if not item_id:
+                # Generate from filename
+                item_id = file_path.stem.upper().replace("-", "_")
+
+            item_type_str = frontmatter.get("type", "task")
+            try:
+                item_type = WorkItemType.from_string(item_type_str)
+            except ValueError:
+                # Try theme mapping
+                item_type = self._map_theme_type(item_type_str)
+                if not item_type:
+                    return None
+
+            status_str = frontmatter.get("status", "backlog")
+            try:
+                status = WorkItemStatus.from_string(status_str)
+            except ValueError:
+                # Try theme mapping
+                status = self._map_theme_status(status_str)
+                if not status:
+                    status = WorkItemStatus.BACKLOG
+
+            # Get title
+            title = frontmatter.get("title", file_path.stem.replace("-", " ").title())
+
+            # Parse optional fields
+            priority = frontmatter.get("priority")
+            assignee = frontmatter.get("assignee")
+            tags = frontmatter.get("tags", [])
+            if isinstance(tags, str):
+                tags = [t.strip() for t in tags.split(",")]
+
+            depends_on = frontmatter.get("depends_on", [])
+            if isinstance(depends_on, str):
+                depends_on = [d.strip() for d in depends_on.split(",")]
+
+            created = None
+            if "created" in frontmatter:
+                created_val = frontmatter["created"]
+                if isinstance(created_val, date):
+                    created = created_val
+                elif isinstance(created_val, str):
+                    try:
+                        created = date.fromisoformat(created_val)
+                    except ValueError:
+                        pass
+
+            # Extract description (content after frontmatter, before yurtle block)
+            description = self._extract_description(content)
+
+            return WorkItem(
+                id=item_id,
+                title=title,
+                item_type=item_type,
+                status=status,
+                file_path=file_path,
+                priority=priority,
+                assignee=assignee,
+                created=created,
+                tags=tags,
+                depends_on=depends_on,
+                description=description,
+            )
+
+        except Exception as e:
+            logger.debug(f"Failed to parse {file_path}: {e}")
+            return None
+
+    def _parse_frontmatter(self, content: str) -> Optional[dict[str, Any]]:
+        """Parse YAML frontmatter from markdown content."""
+        if not content.startswith("---"):
+            return None
+
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            return None
+
+        try:
+            return yaml.safe_load(parts[1])
+        except yaml.YAMLError:
+            return None
+
+    def _extract_description(self, content: str) -> Optional[str]:
+        """Extract description from markdown content."""
+        # Remove frontmatter
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                content = parts[2]
+
+        # Remove yurtle blocks
+        content = re.sub(r"```yurtle.*?```", "", content, flags=re.DOTALL)
+
+        # Remove heading (title)
+        lines = content.strip().split("\n")
+        description_lines = []
+        skip_heading = True
+        for line in lines:
+            if skip_heading and line.startswith("#"):
+                skip_heading = False
+                continue
+            description_lines.append(line)
+
+        description = "\n".join(description_lines).strip()
+        return description if description else None
+
+    def _map_theme_type(self, type_str: str) -> Optional[WorkItemType]:
+        """Map theme-specific type to standard type."""
+        theme = self.config.get_theme()
+        if theme and "item_types" in theme:
+            for type_id, type_def in theme["item_types"].items():
+                if type_id == type_str.lower():
+                    # Map common nautical types
+                    mapping = {
+                        "expedition": WorkItemType.FEATURE,
+                        "voyage": WorkItemType.EPIC,
+                        "directive": WorkItemType.TASK,
+                        "hazard": WorkItemType.BUG,
+                        "signal": WorkItemType.IDEA,
+                    }
+                    return mapping.get(type_id, WorkItemType.TASK)
+        return None
+
+    def _map_theme_status(self, status_str: str) -> Optional[WorkItemStatus]:
+        """Map theme-specific status to standard status."""
+        theme = self.config.get_theme()
+        if theme and "columns" in theme:
+            mapping = {
+                "harbor": WorkItemStatus.BACKLOG,
+                "provisioning": WorkItemStatus.READY,
+                "underway": WorkItemStatus.IN_PROGRESS,
+                "approaching": WorkItemStatus.REVIEW,
+                "arrived": WorkItemStatus.DONE,
+            }
+            return mapping.get(status_str.lower())
+        return None
+
+    def get_board(self) -> Board:
+        """Get the kanban board with all items."""
+        if self._board is None:
+            items = self.scan()
+            columns = self._get_columns_from_theme()
+            self._board = Board(
+                id="main",
+                name=self.config.theme.title() + " Board",
+                columns=columns,
+                items=items,
+            )
+        return self._board
+
+    def _get_columns_from_theme(self) -> list[Column]:
+        """Get column definitions from theme."""
+        theme = self.config.get_theme()
+        columns = []
+
+        if theme and "columns" in theme:
+            for col_id, col_def in theme["columns"].items():
+                columns.append(Column(
+                    id=col_id,
+                    name=col_def.get("name", col_id.title()),
+                    order=col_def.get("order", 0),
+                    wip_limit=col_def.get("wip_limit"),
+                    description=col_def.get("description"),
+                ))
+        else:
+            # Default software columns
+            columns = [
+                Column("backlog", "Backlog", 1),
+                Column("ready", "Ready", 2, wip_limit=5),
+                Column("in_progress", "In Progress", 3, wip_limit=3),
+                Column("review", "Review", 4, wip_limit=2),
+                Column("done", "Done", 5),
+            ]
+
+        return sorted(columns, key=lambda c: c.order)
+
+    def get_item(self, item_id: str) -> Optional[WorkItem]:
+        """Get a work item by ID."""
+        if not self._items:
+            self.scan()
+        return self._items.get(item_id)
+
+    def get_items(
+        self,
+        status: Optional[WorkItemStatus] = None,
+        item_type: Optional[WorkItemType] = None,
+        assignee: Optional[str] = None,
+    ) -> list[WorkItem]:
+        """Get items with optional filters."""
+        if not self._items:
+            self.scan()
+
+        items = list(self._items.values())
+
+        if status:
+            items = [i for i in items if i.status == status]
+        if item_type:
+            items = [i for i in items if i.item_type == item_type]
+        if assignee:
+            items = [i for i in items if i.assignee == assignee]
+
+        return sorted(items, key=lambda i: (-i.priority_score, i.id))
+
+    def create_item(
+        self,
+        item_type: WorkItemType,
+        title: str,
+        path: Optional[Path] = None,
+        priority: str = "medium",
+        assignee: Optional[str] = None,
+        description: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+    ) -> WorkItem:
+        """Create a new work item."""
+        # Generate ID
+        prefix = self._get_type_prefix(item_type)
+        next_num = self._get_next_id_number(prefix)
+        item_id = f"{prefix}-{next_num:03d}"
+
+        # Determine file path
+        if path is None:
+            work_root = self.repo_root / self.config.paths.root
+            type_path = getattr(self.config.paths, item_type.value + "s", None)
+            if type_path:
+                work_root = self.repo_root / type_path
+            path = work_root / f"{item_id}.md"
+
+        # Ensure directory exists
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Create work item
+        item = WorkItem(
+            id=item_id,
+            title=title,
+            item_type=item_type,
+            status=WorkItemStatus.BACKLOG,
+            file_path=path,
+            priority=priority,
+            assignee=assignee,
+            created=date.today(),
+            description=description,
+            tags=tags or [],
+        )
+
+        # Write file
+        path.write_text(item.to_markdown())
+
+        # Add to cache
+        self._items[item_id] = item
+
+        return item
+
+    def _get_type_prefix(self, item_type: WorkItemType) -> str:
+        """Get ID prefix for item type."""
+        theme = self.config.get_theme()
+        if theme and "item_types" in theme:
+            for type_id, type_def in theme["item_types"].items():
+                if type_id == item_type.value:
+                    return type_def.get("id_prefix", item_type.value[:4].upper())
+        # Default prefixes
+        prefixes = {
+            WorkItemType.FEATURE: "FEAT",
+            WorkItemType.BUG: "BUG",
+            WorkItemType.EPIC: "EPIC",
+            WorkItemType.ISSUE: "ISSUE",
+            WorkItemType.TASK: "TASK",
+            WorkItemType.IDEA: "IDEA",
+        }
+        return prefixes.get(item_type, "ITEM")
+
+    def _get_next_id_number(self, prefix: str) -> int:
+        """Get next available ID number for a prefix."""
+        if not self._items:
+            self.scan()
+
+        max_num = 0
+        for item_id in self._items.keys():
+            if item_id.startswith(prefix + "-"):
+                try:
+                    num = int(item_id.split("-")[1])
+                    max_num = max(max_num, num)
+                except (ValueError, IndexError):
+                    pass
+
+        return max_num + 1
+
+    def move_item(
+        self,
+        item_id: str,
+        new_status: WorkItemStatus,
+        commit: bool = True,
+        message: Optional[str] = None,
+    ) -> WorkItem:
+        """Move a work item to a new status."""
+        item = self.get_item(item_id)
+        if not item:
+            raise ValueError(f"Item not found: {item_id}")
+
+        old_status = item.status
+
+        # Validate transition
+        if not self._is_valid_transition(old_status, new_status):
+            raise ValueError(
+                f"Invalid transition from {old_status.value} to {new_status.value}"
+            )
+
+        # Check WIP limits
+        board = self.get_board()
+        for col in board.columns:
+            if col.id == new_status.value:
+                current_count = len(board.get_items_by_status(new_status))
+                if col.wip_limit and current_count >= col.wip_limit:
+                    raise ValueError(
+                        f"WIP limit reached for {col.name} ({current_count}/{col.wip_limit})"
+                    )
+
+        # Update item
+        item.status = new_status
+        item.updated = datetime.now()
+
+        # Update file
+        self._update_item_file(item)
+
+        # Git commit if requested
+        if commit:
+            self._git_commit(
+                item.file_path,
+                message or f"Move {item_id} to {new_status.value}",
+            )
+
+        return item
+
+    def _is_valid_transition(
+        self, from_status: WorkItemStatus, to_status: WorkItemStatus
+    ) -> bool:
+        """Check if a status transition is valid."""
+        # Define valid transitions
+        valid_transitions = {
+            WorkItemStatus.BACKLOG: [WorkItemStatus.READY, WorkItemStatus.BLOCKED],
+            WorkItemStatus.READY: [
+                WorkItemStatus.IN_PROGRESS,
+                WorkItemStatus.BACKLOG,
+                WorkItemStatus.BLOCKED,
+            ],
+            WorkItemStatus.IN_PROGRESS: [
+                WorkItemStatus.REVIEW,
+                WorkItemStatus.DONE,
+                WorkItemStatus.BLOCKED,
+                WorkItemStatus.READY,
+            ],
+            WorkItemStatus.REVIEW: [
+                WorkItemStatus.DONE,
+                WorkItemStatus.IN_PROGRESS,
+                WorkItemStatus.BLOCKED,
+            ],
+            WorkItemStatus.BLOCKED: [
+                WorkItemStatus.READY,
+                WorkItemStatus.IN_PROGRESS,
+                WorkItemStatus.BACKLOG,
+            ],
+            WorkItemStatus.DONE: [],  # Terminal state
+        }
+
+        return to_status in valid_transitions.get(from_status, [])
+
+    def _update_item_file(self, item: WorkItem) -> None:
+        """Update the work item file with current state."""
+        item.file_path.write_text(item.to_markdown())
+
+    def _git_commit(self, file_path: Path, message: str) -> None:
+        """Commit changes to git."""
+        try:
+            subprocess.run(
+                ["git", "add", str(file_path)],
+                cwd=self.repo_root,
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-m", message],
+                cwd=self.repo_root,
+                capture_output=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Git commit failed: {e}")
+
+    def add_comment(
+        self,
+        item_id: str,
+        content: str,
+        author: str,
+        commit: bool = True,
+    ) -> WorkItem:
+        """Add a comment to a work item."""
+        item = self.get_item(item_id)
+        if not item:
+            raise ValueError(f"Item not found: {item_id}")
+
+        comment = Comment(content=content, author=author)
+        item.comments.append(comment)
+        item.updated = datetime.now()
+
+        # Update file (comments go in a special section)
+        self._update_item_with_comment(item, comment)
+
+        if commit:
+            self._git_commit(
+                item.file_path,
+                f"Add comment to {item_id}",
+            )
+
+        return item
+
+    def _update_item_with_comment(self, item: WorkItem, comment: Comment) -> None:
+        """Update item file to include new comment."""
+        content = item.file_path.read_text()
+
+        # Add comment section if not exists
+        if "## Comments" not in content:
+            content += "\n\n## Comments\n"
+
+        # Add comment
+        timestamp = comment.created_at.strftime("%Y-%m-%d %H:%M")
+        content += f"\n### {comment.author} ({timestamp})\n\n{comment.content}\n"
+
+        item.file_path.write_text(content)
+
+    def get_blocked_items(self) -> list[WorkItem]:
+        """Get all blocked items."""
+        return self.get_items(status=WorkItemStatus.BLOCKED)
+
+    def get_my_items(self, assignee: str) -> list[WorkItem]:
+        """Get items assigned to a specific person."""
+        return self.get_items(assignee=assignee)
+
+    def suggest_next_item(self, assignee: Optional[str] = None) -> Optional[WorkItem]:
+        """Suggest the next highest-priority item to work on."""
+        items = self.get_items(status=WorkItemStatus.READY)
+
+        if assignee:
+            # Prefer items assigned to this person
+            my_items = [i for i in items if i.assignee == assignee]
+            if my_items:
+                items = my_items
+
+        if not items:
+            return None
+
+        # Sort by priority
+        items.sort(key=lambda i: -i.priority_score)
+        return items[0]
