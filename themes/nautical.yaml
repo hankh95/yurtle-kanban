@@ -1,0 +1,68 @@
+theme:
+  name: nautical
+  description: "Nautical/ship terminology for adventure-driven teams"
+
+item_types:
+  expedition:
+    id_prefix: "EXP"
+    icon: "X"
+    plural: "Expeditions"
+    color: "#0EA5E9"
+    description: "Research or exploration work"
+
+  voyage:
+    id_prefix: "VOY"
+    icon: "V"
+    plural: "Voyages"
+    color: "#8B5CF6"
+    description: "Multi-expedition initiatives"
+
+  directive:
+    id_prefix: "DIR"
+    icon: "D"
+    plural: "Directives"
+    color: "#F59E0B"
+    description: "Captain's orders"
+
+  hazard:
+    id_prefix: "HAZ"
+    icon: "!"
+    plural: "Hazards"
+    color: "#EF4444"
+    description: "Bugs and blockers"
+
+  signal:
+    id_prefix: "SIG"
+    icon: "S"
+    plural: "Signals"
+    color: "#10B981"
+    description: "Ideas and suggestions"
+
+columns:
+  harbor:
+    name: "Harbor"
+    order: 1
+    description: "Waiting to depart"
+
+  provisioning:
+    name: "Provisioning"
+    order: 2
+    wip_limit: 3
+    description: "Gathering resources"
+
+  underway:
+    name: "Underway"
+    order: 3
+    wip_limit: 2
+    description: "Active work"
+
+  approaching:
+    name: "Approaching Port"
+    order: 4
+    wip_limit: 2
+    description: "Nearly complete"
+
+  arrived:
+    name: "Arrived"
+    order: 5
+    description: "Complete"

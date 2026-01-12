@@ -1,0 +1,70 @@
+theme:
+  name: software
+  description: "Standard software development terminology"
+
+item_types:
+  feature:
+    id_prefix: "FEAT"
+    icon: "+"
+    plural: "Features"
+    color: "#10B981"
+    description: "New functionality"
+
+  bug:
+    id_prefix: "BUG"
+    icon: "!"
+    plural: "Bugs"
+    color: "#EF4444"
+    description: "Defects to fix"
+
+  epic:
+    id_prefix: "EPIC"
+    icon: "E"
+    plural: "Epics"
+    color: "#8B5CF6"
+    description: "Large initiatives"
+
+  issue:
+    id_prefix: "ISSUE"
+    icon: "#"
+    plural: "Issues"
+    color: "#F59E0B"
+    description: "General issues"
+
+  task:
+    id_prefix: "TASK"
+    icon: "T"
+    plural: "Tasks"
+    color: "#64748B"
+    description: "Small work items"
+
+  idea:
+    id_prefix: "IDEA"
+    icon: "?"
+    plural: "Ideas"
+    color: "#6366F1"
+    description: "Future considerations"
+
+columns:
+  backlog:
+    name: "Backlog"
+    order: 1
+
+  ready:
+    name: "Ready"
+    order: 2
+    wip_limit: 5
+
+  in_progress:
+    name: "In Progress"
+    order: 3
+    wip_limit: 3
+
+  review:
+    name: "Review"
+    order: 4
+    wip_limit: 2
+
+  done:
+    name: "Done"
+    order: 5
