@@ -39,30 +39,36 @@ item_types:
     description: "Ideas and suggestions"
 
 columns:
-  harbor:
+  # Use standard status IDs with nautical display names
+  backlog:
     name: "Harbor"
     order: 1
     description: "Waiting to depart"
 
-  provisioning:
+  ready:
     name: "Provisioning"
     order: 2
     wip_limit: 3
     description: "Gathering resources"
 
-  underway:
+  in_progress:
     name: "Underway"
     order: 3
     wip_limit: 2
     description: "Active work"
 
-  approaching:
+  review:
     name: "Approaching Port"
     order: 4
     wip_limit: 2
     description: "Nearly complete"
 
-  arrived:
+  done:
     name: "Arrived"
     order: 5
     description: "Complete"
+
+  blocked:
+    name: "Stranded"
+    order: 6
+    description: "Blocked by external factors"
