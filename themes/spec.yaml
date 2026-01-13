@@ -1,0 +1,81 @@
+# Spec-Driven Development Theme
+# For teams using RFCs, ADRs, and formal specifications
+
+name: Spec-Driven Development
+description: |
+  A theme for specification-driven development workflows.
+  Emphasizes design-first with RFCs, formal specs, and architecture decision records.
+
+# Work item types
+item_types:
+  rfc:
+    id_prefix: RFC
+    name: Request for Comments
+    description: Proposal for discussion and feedback before implementation
+
+  spec:
+    id_prefix: SPEC
+    name: Specification
+    description: Detailed specification ready for implementation
+
+  issue:
+    id_prefix: ISSUE
+    name: Issue
+    description: Problem, bug, or defect requiring resolution
+
+  task:
+    id_prefix: TASK
+    name: Task
+    description: Implementation work item
+
+  spike:
+    id_prefix: SPIKE
+    name: Spike
+    description: Research or investigation with time-boxed scope
+
+  adr:
+    id_prefix: ADR
+    name: Architecture Decision Record
+    description: Document recording an architecture decision and its context
+
+# Board columns
+columns:
+  draft:
+    name: Draft
+    order: 1
+    description: Work in progress, not ready for review
+
+  proposed:
+    name: Proposed
+    order: 2
+    wip_limit: 10
+    description: Ready for discussion and feedback
+
+  implementing:
+    name: Implementing
+    order: 3
+    wip_limit: 5
+    description: Actively being implemented
+
+  review:
+    name: Review
+    order: 4
+    wip_limit: 3
+    description: Implementation complete, awaiting review
+
+  accepted:
+    name: Accepted
+    order: 5
+    description: Approved and complete
+
+  blocked:
+    name: Blocked
+    order: 6
+    description: Cannot proceed due to blocker
+
+# Status mappings (for compatibility)
+status_aliases:
+  backlog: draft
+  ready: proposed
+  in_progress: implementing
+  done: accepted
