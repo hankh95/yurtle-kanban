@@ -634,3 +634,71 @@ class KanbanService:
         # Sort by priority
         items.sort(key=lambda i: -i.priority_score)
         return items[0]
+
+    def update_item(
+        self,
+        item_id: str,
+        title: Optional[str] = None,
+        priority: Optional[str] = None,
+        assignee: Optional[str] = None,
+        description: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        commit: bool = True,
+        message: Optional[str] = None,
+    ) -> WorkItem:
+        """Update a work item's properties (not status - use move_item for that).
+
+        Args:
+            item_id: The work item ID to update
+            title: New title (optional)
+            priority: New priority level (optional)
+            assignee: New assignee (optional)
+            description: New description (optional)
+            tags: New tags list (optional, replaces existing)
+            commit: Whether to git commit the change
+            message: Optional commit message
+        """
+        item = self.get_item(item_id)
+        if not item:
+            raise ValueError(f"Item not found: {item_id}")
+
+        # Track what changed for commit message
+        changes = []
+
+        if title is not None and title != item.title:
+            item.title = title
+            changes.append("title")
+
+        if priority is not None and priority != item.priority:
+            item.priority = priority
+            changes.append("priority")
+
+        if assignee is not None and assignee != item.assignee:
+            item.assignee = assignee
+            changes.append("assignee")
+
+        if description is not None and description != item.description:
+            item.description = description
+            changes.append("description")
+
+        if tags is not None and tags != item.tags:
+            item.tags = tags
+            changes.append("tags")
+
+        if not changes:
+            return item  # Nothing to update
+
+        item.updated = datetime.now()
+
+        # Update file
+        self._update_item_file(item)
+
+        # Git commit if requested
+        if commit:
+            change_summary = ", ".join(changes)
+            self._git_commit(
+                item.file_path,
+                message or f"Update {item_id}: {change_summary}",
+            )
+
+        return item

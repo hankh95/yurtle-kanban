@@ -210,6 +210,42 @@ class KanbanMCPServer:
                     "required": ["item_id", "comment"],
                 },
             },
+            {
+                "name": "kanban_update_item",
+                "description": "Update a work item's properties (title, priority, assignee, description, tags). Use move_item for status changes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "item_id": {
+                            "type": "string",
+                            "description": "The work item ID to update",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "New title for the work item",
+                        },
+                        "priority": {
+                            "type": "string",
+                            "description": "New priority level",
+                            "enum": ["critical", "high", "medium", "low"],
+                        },
+                        "assignee": {
+                            "type": "string",
+                            "description": "New assignee for the item",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "New description for the item",
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "New tags (replaces existing tags)",
+                        },
+                    },
+                    "required": ["item_id"],
+                },
+            },
         ]
 
     def handle_tool_call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -233,6 +269,8 @@ class KanbanMCPServer:
                 return self._suggest_next(arguments)
             elif name == "kanban_add_comment":
                 return self._add_comment(arguments)
+            elif name == "kanban_update_item":
+                return self._update_item(arguments)
             else:
                 return {"error": f"Unknown tool: {name}"}
         except Exception as e:
@@ -375,6 +413,25 @@ class KanbanMCPServer:
             "success": True,
             "item_id": item.id,
             "message": f"Added comment to {item.id}",
+        }
+
+    def _update_item(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Update a work item's properties."""
+        item_id = args["item_id"].upper()
+
+        item = self.service.update_item(
+            item_id=item_id,
+            title=args.get("title"),
+            priority=args.get("priority"),
+            assignee=args.get("assignee"),
+            description=args.get("description"),
+            tags=args.get("tags"),
+        )
+
+        return {
+            "success": True,
+            "item": item.to_dict(),
+            "message": f"Updated {item.id}",
         }
 
 
