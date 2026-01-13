@@ -17,12 +17,12 @@ item_types:
     color: "#8B5CF6"
     description: "Multi-expedition initiatives"
 
-  directive:
-    id_prefix: "DIR"
-    icon: "D"
-    plural: "Directives"
-    color: "#F59E0B"
-    description: "Captain's orders"
+  chore:
+    id_prefix: "CHORE"
+    icon: "C"
+    plural: "Chores"
+    color: "#6B7280"
+    description: "Maintenance and cleanup tasks"
 
   hazard:
     id_prefix: "HAZ"

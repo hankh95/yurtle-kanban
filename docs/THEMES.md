@@ -9,9 +9,9 @@ yurtle-kanban supports multiple themes to match your team's vocabulary and workf
 | **Large initiative** | Epic | Voyage | RFC |
 | **Deliverable work** | Feature | Expedition | Spec |
 | **Problem/defect** | Bug | Hazard | Issue |
-| **Small work unit** | Task | Directive | Task |
+| **Small work unit** | Task | Task | Task |
 | **Research/idea** | Idea | Signal | Spike |
-| **Maintenance** | Chore | (Directive) | ADR |
+| **Maintenance** | Chore | Chore | ADR |
 
 ## Status Mapping
 
@@ -48,8 +48,8 @@ Maritime metaphor for project work. Used by NuSy and teams who prefer the voyage
 | Voyage | VOY- | Strategic multi-month goals |
 | Expedition | EXP- | Time-boxed deliverable work |
 | Hazard | HAZ- | Problems requiring resolution |
-| Directive | DIR- | Orders from command |
 | Signal | SIG- | Observations and opportunities |
+| Chore | CHORE- | Maintenance and cleanup |
 
 **Why Nautical?**
 - Voyages have clear destinations (goals)
