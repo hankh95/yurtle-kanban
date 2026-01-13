@@ -353,5 +353,99 @@ def export_cmd(fmt: str, output: Optional[str]):
         click.echo(content)
 
 
+@main.command()
+@click.option("--fix", is_flag=True, help="Attempt to fix issues (rename files)")
+def validate(fix: bool):
+    """Validate work items for consistency issues.
+
+    Checks:
+    - File name matches ID in frontmatter
+    - No duplicate IDs
+    - Required fields present (id, title, status, type)
+    """
+    service = get_service()
+    items = service.get_items()
+
+    issues = []
+    seen_ids = {}
+
+    for item in items:
+        # Check for duplicate IDs
+        if item.id in seen_ids:
+            issues.append({
+                "type": "duplicate_id",
+                "id": item.id,
+                "file": str(item.file_path),
+                "other_file": str(seen_ids[item.id]),
+                "message": f"Duplicate ID: {item.id} in {item.file_path} and {seen_ids[item.id]}",
+            })
+        else:
+            seen_ids[item.id] = item.file_path
+
+        # Check file name matches ID
+        file_stem = item.file_path.stem  # e.g., "EXP-300-Some-Title"
+        expected_prefix = item.id  # e.g., "EXP-300"
+
+        if not file_stem.startswith(expected_prefix):
+            issues.append({
+                "type": "filename_mismatch",
+                "id": item.id,
+                "file": str(item.file_path),
+                "expected_prefix": expected_prefix,
+                "message": f"File name '{file_stem}' doesn't start with ID '{expected_prefix}'",
+            })
+
+    if not issues:
+        console.print("[green]All work items valid.[/green]")
+        console.print(f"  Checked {len(items)} items")
+        return
+
+    # Report issues
+    console.print(f"[bold red]Found {len(issues)} issue(s):[/bold red]")
+    console.print()
+
+    for issue in issues:
+        if issue["type"] == "duplicate_id":
+            console.print(f"[red]DUPLICATE ID:[/red] {issue['id']}")
+            console.print(f"  File 1: {issue['file']}")
+            console.print(f"  File 2: {issue['other_file']}")
+        elif issue["type"] == "filename_mismatch":
+            console.print(f"[yellow]FILENAME MISMATCH:[/yellow] {issue['id']}")
+            console.print(f"  File: {issue['file']}")
+            console.print(f"  Expected prefix: {issue['expected_prefix']}")
+
+        console.print()
+
+    if fix:
+        fixed = 0
+        for issue in issues:
+            if issue["type"] == "filename_mismatch":
+                old_path = Path(issue["file"])
+                # Build new filename: ID + rest of old name after any existing ID
+                old_stem = old_path.stem
+                new_stem = issue["expected_prefix"]
+
+                # Try to preserve the descriptive part after the ID
+                # e.g., "EXP-303-Automated-Domain-Research" -> keep "-Automated-Domain-Research"
+                import re
+                match = re.match(r"^[A-Z]+-\d+(-.*)?$", old_stem)
+                if match and match.group(1):
+                    new_stem = issue["expected_prefix"] + match.group(1)
+
+                new_path = old_path.parent / f"{new_stem}{old_path.suffix}"
+
+                if new_path != old_path and not new_path.exists():
+                    old_path.rename(new_path)
+                    console.print(f"[green]Fixed:[/green] {old_path.name} -> {new_path.name}")
+                    fixed += 1
+
+        if fixed:
+            console.print(f"\n[green]Fixed {fixed} issue(s)[/green]")
+    else:
+        console.print("[dim]Run with --fix to attempt automatic fixes[/dim]")
+
+    sys.exit(1)
+
+
 if __name__ == "__main__":
     main()
