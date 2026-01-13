@@ -66,6 +66,18 @@ Issues = "https://github.com/hankh95/yurtle-kanban/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["src/yurtle_kanban"]
 
+[tool.hatch.build]
+include = [
+    "src/yurtle_kanban/**/*.py",
+    "templates/**/*.md",
+    "themes/**/*.yaml",
+    "examples/**/*",
+]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"templates" = "share/yurtle-kanban/templates"
+"themes" = "share/yurtle-kanban/themes"
+
 [tool.ruff]
 target-version = "py310"
 line-length = 100

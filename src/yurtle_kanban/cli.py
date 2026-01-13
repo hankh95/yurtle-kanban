@@ -16,6 +16,7 @@ Usage:
 """
 
 import json
+import shutil
 import sys
 from pathlib import Path
 from typing import Optional
@@ -28,6 +29,23 @@ from .config import KanbanConfig
 from .export import export_html, export_markdown, export_json
 from .models import WorkItemStatus, WorkItemType
 from .service import KanbanService
+
+
+def _get_templates_dir() -> Path:
+    """Get the path to the templates directory in the package."""
+    # Templates are at the package root level (not in src/)
+    try:
+        import yurtle_kanban
+        package_dir = Path(yurtle_kanban.__file__).parent.parent.parent
+        templates_dir = package_dir / "templates"
+        if templates_dir.exists():
+            return templates_dir
+    except Exception:
+        pass
+
+    # Fallback: try relative to this file
+    templates_dir = Path(__file__).parent.parent.parent / "templates"
+    return templates_dir
 
 
 console = Console()
@@ -62,9 +80,11 @@ def init(theme: str, path: str):
     """Initialize yurtle-kanban in the current directory."""
     repo_root = Path.cwd()
 
-    # Create .kanban directory
+    # Create .kanban directory structure
     kanban_dir = repo_root / ".kanban"
     kanban_dir.mkdir(exist_ok=True)
+    (kanban_dir / "workflows").mkdir(exist_ok=True)
+    (kanban_dir / "templates").mkdir(exist_ok=True)
 
     # Create config.yaml
     config_content = f"""# yurtle-kanban configuration
@@ -85,6 +105,17 @@ kanban:
     config_path = kanban_dir / "config.yaml"
     config_path.write_text(config_content)
 
+    # Copy templates for the selected theme
+    templates_src = _get_templates_dir()
+    theme_templates = templates_src / theme
+    templates_copied = 0
+
+    if theme_templates.exists():
+        templates_dst = kanban_dir / "templates"
+        for template_file in theme_templates.glob("*.md"):
+            shutil.copy(template_file, templates_dst / template_file.name)
+            templates_copied += 1
+
     # Create work directory
     work_dir = repo_root / path
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -92,11 +123,14 @@ kanban:
 
     console.print(f"[green]Initialized yurtle-kanban with theme '{theme}'[/green]")
     console.print(f"  Created: .kanban/config.yaml")
+    console.print(f"  Created: .kanban/templates/ ({templates_copied} templates)")
+    console.print(f"  Created: .kanban/workflows/")
     console.print(f"  Created: {path}")
     console.print()
     console.print("Next steps:")
     console.print(f"  1. Create work items: yurtle-kanban create feature 'My feature'")
     console.print(f"  2. View board: yurtle-kanban board")
+    console.print(f"  3. Customize templates in .kanban/templates/")
 
 
 @main.command("list")
