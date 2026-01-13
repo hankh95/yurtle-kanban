@@ -1,0 +1,109 @@
+# GitHub Action: Update Kanban Board
+#
+# This workflow automatically regenerates the static HTML board view
+# whenever work item files are modified. The generated board is deployed
+# to GitHub Pages.
+#
+# Triggers:
+# - Push to work items (configurable paths)
+# - Push to .kanban/ config
+# - Manual dispatch
+
+name: Update Kanban Board
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # Default paths - customize in your fork
+      - 'work/**/*.md'
+      - 'kanban/**/*.md'
+      - 'specs/**/*.md'
+      - '.kanban/**'
+  workflow_dispatch:
+    inputs:
+      force_regenerate:
+        description: 'Force regenerate board even if no changes'
+        required: false
+        default: 'false'
+
+# Sets permissions for GitHub Pages deployment
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install yurtle-kanban
+        run: |
+          pip install -e .
+
+      - name: Generate board HTML
+        run: |
+          mkdir -p docs/board
+          yurtle-kanban export --format html --output docs/board/index.html
+          yurtle-kanban export --format json --output docs/board/board.json
+          yurtle-kanban export --format markdown --output docs/board/README.md
+
+      - name: Create Pages artifact
+        run: |
+          # Create a simple index if docs/board/index.html exists
+          if [ -f docs/board/index.html ]; then
+            echo "Board generated successfully"
+          else
+            echo "No work items found, creating placeholder"
+            mkdir -p docs/board
+            cat > docs/board/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Kanban Board</title>
+            <style>
+              body { font-family: sans-serif; padding: 40px; text-align: center; }
+              h1 { color: #333; }
+              p { color: #666; }
+            </style>
+          </head>
+          <body>
+            <h1>Kanban Board</h1>
+            <p>No work items found. Add work items to your configured paths.</p>
+            <p><a href="https://github.com/hankh95/yurtle-kanban">yurtle-kanban documentation</a></p>
+          </body>
+          </html>
+          EOF
+          fi
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'docs/board'
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

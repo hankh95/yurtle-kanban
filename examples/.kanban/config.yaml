@@ -1,0 +1,19 @@
+# Example yurtle-kanban configuration
+# This config demonstrates how to set up yurtle-kanban for a project
+
+kanban:
+  # Theme: 'software' (default), 'nautical', or path to custom theme
+  theme: software
+
+  # Where to find work items
+  paths:
+    root: work/
+
+  # Workflow file (optional - uses default if not specified)
+  workflows:
+    default: .kanban/workflows/feature.yurtle.md
+
+  # Ignored patterns (optional)
+  ignore:
+    - "**/archive/**"
+    - "**/templates/**"
