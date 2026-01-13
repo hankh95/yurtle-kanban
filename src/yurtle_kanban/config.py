@@ -14,27 +14,46 @@ import yaml
 _theme_cache: dict[str, dict[str, Any]] = {}
 
 
-def _load_builtin_theme(theme_name: str) -> Optional[dict[str, Any]]:
-    """Load a built-in theme from the package."""
+def _load_builtin_theme(theme_name: str, repo_root: Optional[Path] = None) -> Optional[dict[str, Any]]:
+    """Load a theme from local .kanban/themes/ or package resources."""
     if theme_name in _theme_cache:
         return _theme_cache[theme_name]
 
-    try:
-        # Try to load from package resources
-        try:
-            import yurtle_kanban
-            package_dir = Path(yurtle_kanban.__file__).parent.parent.parent
-            theme_path = package_dir / "themes" / f"{theme_name}.yaml"
-        except Exception:
-            theme_path = Path(__file__).parent.parent.parent / "themes" / f"{theme_name}.yaml"
+    # Priority 1: Local .kanban/themes/ folder
+    search_paths = []
+    if repo_root:
+        search_paths.append(repo_root / ".kanban" / "themes" / f"{theme_name}.yaml")
+    search_paths.append(Path.cwd() / ".kanban" / "themes" / f"{theme_name}.yaml")
 
-        if theme_path.exists():
-            with open(theme_path) as f:
-                theme = yaml.safe_load(f)
-                _theme_cache[theme_name] = theme
-                return theme
+    # Priority 2: Package share directory (pip installed)
+    try:
+        import sys
+        for path in sys.path:
+            share_path = Path(path).parent / "share" / "yurtle-kanban" / "themes" / f"{theme_name}.yaml"
+            if share_path.exists():
+                search_paths.append(share_path)
     except Exception:
         pass
+
+    # Priority 3: Source directory (development)
+    try:
+        import yurtle_kanban
+        package_dir = Path(yurtle_kanban.__file__).parent.parent.parent
+        search_paths.append(package_dir / "themes" / f"{theme_name}.yaml")
+    except Exception:
+        pass
+    search_paths.append(Path(__file__).parent.parent.parent / "themes" / f"{theme_name}.yaml")
+
+    # Try each path
+    for theme_path in search_paths:
+        try:
+            if theme_path.exists():
+                with open(theme_path) as f:
+                    theme = yaml.safe_load(f)
+                    _theme_cache[theme_name] = theme
+                    return theme
+        except Exception:
+            continue
 
     return None
 

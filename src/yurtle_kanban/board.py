@@ -257,12 +257,18 @@ def render_list(items: list[WorkItem], console: Optional[Console] = None) -> Non
         if len(title) > 40:
             title = title[:37] + "..."
 
+        # Handle assignee as string or list
+        assignee = item.assignee
+        if isinstance(assignee, list):
+            assignee = ", ".join(str(a) for a in assignee if a)
+        assignee = assignee or "-"
+
         table.add_row(
             f"{icon} {item.id}",
             title,
             f"[{status_color}]{item.status.value}[/{status_color}]",
             f"[{priority_color}]{item.priority or 'medium'}[/{priority_color}]",
-            item.assignee or "-",
+            assignee,
         )
 
     console.print(table)

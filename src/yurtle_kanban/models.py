@@ -226,6 +226,8 @@ class Board:
     name: str
     columns: list[Column]
     items: list[WorkItem] = field(default_factory=list)
+    # Optional mapping from column ID to WorkItemStatus (for themed columns)
+    column_status_map: dict[str, WorkItemStatus] = field(default_factory=dict)
 
     def get_items_by_status(self, status: WorkItemStatus) -> list[WorkItem]:
         """Get all items with a specific status."""
@@ -235,7 +237,16 @@ class Board:
         """Get count of items in each column."""
         counts = {}
         for col in self.columns:
-            status = WorkItemStatus.from_string(col.id)
+            # Use column_status_map if available, otherwise try standard parsing
+            if col.id in self.column_status_map:
+                status = self.column_status_map[col.id]
+            else:
+                try:
+                    status = WorkItemStatus.from_string(col.id)
+                except ValueError:
+                    # Unknown column, count as 0
+                    counts[col.id] = 0
+                    continue
             counts[col.id] = len(self.get_items_by_status(status))
         return counts
 
