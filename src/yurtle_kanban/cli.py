@@ -353,6 +353,47 @@ def export_cmd(fmt: str, output: Optional[str]):
         click.echo(content)
 
 
+@main.command("next-id")
+@click.argument("prefix")
+@click.option("--no-sync", is_flag=True, help="Skip git fetch/push (local only)")
+@click.option("--no-commit", is_flag=True, help="Don't commit the allocation")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def next_id(prefix: str, no_sync: bool, no_commit: bool, as_json: bool):
+    """Allocate the next available ID for a prefix.
+
+    This command prevents duplicate IDs when multiple agents create work items
+    concurrently by:
+    1. Fetching latest changes from remote
+    2. Scanning all files to find the highest ID
+    3. Committing and pushing an allocation lock file
+
+    Examples:
+        yurtle-kanban next-id EXP       # Allocate next expedition ID
+        yurtle-kanban next-id FEAT      # Allocate next feature ID
+        yurtle-kanban next-id EXP --no-sync  # Local only (no git operations)
+    """
+    service = get_service()
+
+    result = service.allocate_next_id(
+        prefix=prefix,
+        sync_remote=not no_sync,
+        commit_allocation=not no_commit,
+    )
+
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+    else:
+        if result["success"]:
+            console.print(f"[green]Allocated: {result['id']}[/green]")
+            console.print(f"  Prefix: {result['prefix']}")
+            console.print(f"  Number: {result['number']}")
+            if not no_sync:
+                console.print("[dim]  (committed and pushed to remote)[/dim]")
+        else:
+            console.print(f"[red]Failed to allocate ID: {result['message']}[/red]")
+            sys.exit(1)
+
+
 @main.command()
 @click.option("--fix", is_flag=True, help="Attempt to fix issues (rename files)")
 def validate(fix: bool):

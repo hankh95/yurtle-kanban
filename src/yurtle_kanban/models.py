@@ -32,13 +32,21 @@ class WorkItemStatus(Enum):
 
 
 class WorkItemType(Enum):
-    """Standard work item types (software theme)."""
+    """Standard work item types (supports both software and nautical themes)."""
+    # Software theme
     FEATURE = "feature"
     BUG = "bug"
     EPIC = "epic"
     ISSUE = "issue"
     TASK = "task"
     IDEA = "idea"
+    # Nautical theme
+    EXPEDITION = "expedition"
+    VOYAGE = "voyage"
+    DIRECTIVE = "directive"
+    HAZARD = "hazard"
+    SIGNAL = "signal"
+    CHORE = "chore"
 
     @classmethod
     def from_string(cls, value: str) -> "WorkItemType":

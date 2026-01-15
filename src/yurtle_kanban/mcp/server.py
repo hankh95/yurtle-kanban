@@ -246,6 +246,25 @@ class KanbanMCPServer:
                     "required": ["item_id"],
                 },
             },
+            {
+                "name": "kanban_next_id",
+                "description": "Allocate the next available ID for a prefix. IMPORTANT: Call this before creating a new work item to prevent duplicate IDs when multiple agents work concurrently. This fetches from remote, finds the highest existing ID, and commits an allocation lock.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "prefix": {
+                            "type": "string",
+                            "description": "The ID prefix (e.g., 'EXP' for expeditions, 'FEAT' for features, 'BUG' for bugs, 'VOY' for voyages)",
+                        },
+                        "sync_remote": {
+                            "type": "boolean",
+                            "description": "Whether to fetch/push to remote git (default: true). Set false for local-only allocation.",
+                            "default": True,
+                        },
+                    },
+                    "required": ["prefix"],
+                },
+            },
         ]
 
     def handle_tool_call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -271,6 +290,8 @@ class KanbanMCPServer:
                 return self._add_comment(arguments)
             elif name == "kanban_update_item":
                 return self._update_item(arguments)
+            elif name == "kanban_next_id":
+                return self._next_id(arguments)
             else:
                 return {"error": f"Unknown tool: {name}"}
         except Exception as e:
@@ -433,6 +454,19 @@ class KanbanMCPServer:
             "item": item.to_dict(),
             "message": f"Updated {item.id}",
         }
+
+    def _next_id(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Allocate the next available ID for a prefix."""
+        prefix = args["prefix"].upper()
+        sync_remote = args.get("sync_remote", True)
+
+        result = self.service.allocate_next_id(
+            prefix=prefix,
+            sync_remote=sync_remote,
+            commit_allocation=True,
+        )
+
+        return result
 
 
 def run_server():

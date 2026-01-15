@@ -384,23 +384,38 @@ class KanbanService:
             for type_id, type_def in theme["item_types"].items():
                 if type_id == item_type.value:
                     return type_def.get("id_prefix", item_type.value[:4].upper())
-        # Default prefixes
+        # Default prefixes (software + nautical themes)
         prefixes = {
+            # Software theme
             WorkItemType.FEATURE: "FEAT",
             WorkItemType.BUG: "BUG",
             WorkItemType.EPIC: "EPIC",
             WorkItemType.ISSUE: "ISSUE",
             WorkItemType.TASK: "TASK",
             WorkItemType.IDEA: "IDEA",
+            # Nautical theme
+            WorkItemType.EXPEDITION: "EXP",
+            WorkItemType.VOYAGE: "VOY",
+            WorkItemType.DIRECTIVE: "DIR",
+            WorkItemType.HAZARD: "HAZ",
+            WorkItemType.SIGNAL: "SIG",
+            WorkItemType.CHORE: "CHORE",
         }
         return prefixes.get(item_type, "ITEM")
 
     def _get_next_id_number(self, prefix: str) -> int:
-        """Get next available ID number for a prefix."""
+        """Get next available ID number for a prefix.
+
+        Scans both:
+        1. Item IDs from frontmatter (via self._items)
+        2. Filenames directly (to catch files without proper frontmatter)
+        """
         if not self._items:
             self.scan()
 
         max_num = 0
+
+        # Check IDs from parsed items
         for item_id in self._items.keys():
             if item_id.startswith(prefix + "-"):
                 try:
@@ -409,7 +424,180 @@ class KanbanService:
                 except (ValueError, IndexError):
                     pass
 
+        # Also scan filenames directly to catch files without frontmatter
+        for scan_path in self.config.get_work_paths():
+            full_path = self.repo_root / scan_path
+            if full_path.exists():
+                for md_file in full_path.rglob("*.md"):
+                    filename = md_file.stem  # e.g., "EXP-608-Some-Title"
+                    if filename.startswith(prefix + "-"):
+                        try:
+                            # Extract number from filename
+                            parts = filename.split("-")
+                            if len(parts) >= 2:
+                                num = int(parts[1])
+                                max_num = max(max_num, num)
+                        except (ValueError, IndexError):
+                            pass
+
         return max_num + 1
+
+    def allocate_next_id(
+        self,
+        prefix: str,
+        sync_remote: bool = True,
+        commit_allocation: bool = True,
+    ) -> dict[str, Any]:
+        """Allocate the next available ID for a prefix with git synchronization.
+
+        This method prevents duplicate IDs when multiple agents create work items
+        concurrently by:
+        1. Fetching latest changes from remote (if sync_remote=True)
+        2. Scanning all files to find the highest ID
+        3. Writing an allocation lock file and committing it
+        4. Returning the allocated ID
+
+        Args:
+            prefix: The ID prefix (e.g., "EXP", "FEAT", "BUG")
+            sync_remote: Whether to fetch latest from remote first
+            commit_allocation: Whether to commit the allocation lock file
+
+        Returns:
+            dict with 'id', 'prefix', 'number', and 'success' keys
+        """
+        import json
+        from datetime import datetime
+
+        prefix = prefix.upper()
+
+        # Step 1: Fetch latest from remote
+        if sync_remote:
+            try:
+                result = subprocess.run(
+                    ["git", "fetch", "origin"],
+                    cwd=self.repo_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if result.returncode != 0:
+                    logger.warning(f"Git fetch failed: {result.stderr}")
+            except subprocess.TimeoutExpired:
+                logger.warning("Git fetch timed out")
+            except Exception as e:
+                logger.warning(f"Git fetch error: {e}")
+
+        # Step 2: Re-scan to get latest items
+        self._items.clear()
+        self.scan()
+
+        # Step 3: Find next available number
+        next_num = self._get_next_id_number(prefix)
+        item_id = f"{prefix}-{next_num:03d}"
+
+        # Step 4: Write allocation lock file
+        lock_file = self.repo_root / ".kanban" / "_ID_ALLOCATIONS.json"
+        lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing allocations
+        allocations = []
+        if lock_file.exists():
+            try:
+                allocations = json.loads(lock_file.read_text())
+            except (json.JSONDecodeError, Exception):
+                allocations = []
+
+        # Add new allocation
+        allocation = {
+            "id": item_id,
+            "prefix": prefix,
+            "number": next_num,
+            "allocated_at": datetime.now().isoformat(),
+            "allocated_by": self._get_git_user(),
+        }
+        allocations.append(allocation)
+
+        # Keep only recent allocations (last 100)
+        allocations = allocations[-100:]
+        lock_file.write_text(json.dumps(allocations, indent=2))
+
+        # Step 5: Commit the allocation
+        if commit_allocation:
+            try:
+                subprocess.run(
+                    ["git", "add", str(lock_file)],
+                    cwd=self.repo_root,
+                    capture_output=True,
+                    check=True,
+                )
+                subprocess.run(
+                    ["git", "commit", "-m", f"Allocate ID: {item_id}"],
+                    cwd=self.repo_root,
+                    capture_output=True,
+                    check=True,
+                )
+                # Push to remote to claim the ID
+                if sync_remote:
+                    push_result = subprocess.run(
+                        ["git", "push"],
+                        cwd=self.repo_root,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    if push_result.returncode != 0:
+                        # Push failed - likely another agent allocated an ID
+                        # Pull and retry
+                        logger.warning(f"Push failed, will retry: {push_result.stderr}")
+                        return self._retry_allocation(prefix)
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"Git commit failed: {e}")
+
+        return {
+            "success": True,
+            "id": item_id,
+            "prefix": prefix,
+            "number": next_num,
+            "message": f"Allocated {item_id}",
+        }
+
+    def _retry_allocation(self, prefix: str, max_retries: int = 3) -> dict[str, Any]:
+        """Retry allocation after a conflict."""
+        for attempt in range(max_retries):
+            try:
+                # Pull latest
+                subprocess.run(
+                    ["git", "pull", "--rebase"],
+                    cwd=self.repo_root,
+                    capture_output=True,
+                    check=True,
+                    timeout=30,
+                )
+                # Try allocation again
+                return self.allocate_next_id(prefix, sync_remote=False, commit_allocation=True)
+            except Exception as e:
+                logger.warning(f"Retry {attempt + 1} failed: {e}")
+
+        return {
+            "success": False,
+            "id": None,
+            "prefix": prefix,
+            "number": None,
+            "message": "Failed to allocate ID after retries",
+        }
+
+    def _get_git_user(self) -> str:
+        """Get current git user name."""
+        try:
+            result = subprocess.run(
+                ["git", "config", "user.name"],
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+            )
+            return result.stdout.strip() or "unknown"
+        except Exception:
+            return "unknown"
 
     def move_item(
         self,
