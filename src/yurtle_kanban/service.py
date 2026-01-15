@@ -495,31 +495,32 @@ class KanbanService:
         next_num = self._get_next_id_number(prefix)
         item_id = f"{prefix}-{next_num:03d}"
 
-        # Step 4: Write allocation lock file
-        lock_file = self.repo_root / ".kanban" / "_ID_ALLOCATIONS.json"
-        lock_file.parent.mkdir(parents=True, exist_ok=True)
+        # Step 4: Write allocation lock file (only if committing)
+        if commit_allocation:
+            lock_file = self.repo_root / ".kanban" / "_ID_ALLOCATIONS.json"
+            lock_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Load existing allocations
-        allocations = []
-        if lock_file.exists():
-            try:
-                allocations = json.loads(lock_file.read_text())
-            except (json.JSONDecodeError, Exception):
-                allocations = []
+            # Load existing allocations
+            allocations = []
+            if lock_file.exists():
+                try:
+                    allocations = json.loads(lock_file.read_text())
+                except (json.JSONDecodeError, Exception):
+                    allocations = []
 
-        # Add new allocation
-        allocation = {
-            "id": item_id,
-            "prefix": prefix,
-            "number": next_num,
-            "allocated_at": datetime.now().isoformat(),
-            "allocated_by": self._get_git_user(),
-        }
-        allocations.append(allocation)
+            # Add new allocation
+            allocation = {
+                "id": item_id,
+                "prefix": prefix,
+                "number": next_num,
+                "allocated_at": datetime.now().isoformat(),
+                "allocated_by": self._get_git_user(),
+            }
+            allocations.append(allocation)
 
-        # Keep only recent allocations (last 100)
-        allocations = allocations[-100:]
-        lock_file.write_text(json.dumps(allocations, indent=2))
+            # Keep only recent allocations (last 100)
+            allocations = allocations[-100:]
+            lock_file.write_text(json.dumps(allocations, indent=2))
 
         # Step 5: Commit the allocation
         if commit_allocation:
