@@ -75,9 +75,35 @@ yurtle-kanban export --format json
 | `board` | Display kanban board in terminal |
 | `stats` | Show board statistics |
 | `next` | Suggest next item to work on |
+| `next-id` | **Allocate next ID atomically (prevents duplicates!)** |
 | `blocked` | List blocked items |
 | `comment` | Add comment to item |
 | `export` | Export board to HTML/Markdown/JSON |
+| `validate` | Check for ID mismatches and duplicates |
+
+### Preventing Duplicate IDs (Multi-Agent Safe)
+
+When multiple agents or developers create work items concurrently, use `next-id` to prevent duplicate IDs:
+
+```bash
+# Allocate next ID with git sync (recommended)
+yurtle-kanban next-id EXP
+# Output: Allocated: EXP-609
+
+# Get JSON output
+yurtle-kanban next-id EXP --json
+# {"success": true, "id": "EXP-609", "prefix": "EXP", "number": 609}
+
+# Local only (no git fetch/push)
+yurtle-kanban next-id EXP --no-sync
+```
+
+The command:
+1. Fetches latest from remote
+2. Scans files (frontmatter + filenames) for highest ID
+3. Commits allocation to `.kanban/_ID_ALLOCATIONS.json`
+4. Pushes to remote to claim the ID
+5. Retries with rebase if push fails (another agent got there first)
 
 ## Work Items as Files
 
@@ -182,6 +208,29 @@ yurtle-kanban-mcp
 | `kanban_get_blocked` | Get blocked items |
 | `kanban_suggest_next` | Suggest next item to work on |
 | `kanban_add_comment` | Add comment to item |
+| `kanban_update_item` | Update item properties |
+| **`kanban_next_id`** | **Allocate next ID (prevents duplicates!)** |
+
+### Critical: Using `kanban_next_id` for Multi-Agent Safety
+
+When creating new work items, ALWAYS call `kanban_next_id` first:
+
+```json
+// Step 1: Allocate ID
+{
+  "name": "kanban_next_id",
+  "arguments": {
+    "prefix": "EXP",
+    "sync_remote": true
+  }
+}
+// Returns: {"success": true, "id": "EXP-609", "number": 609}
+
+// Step 2: Create file using that ID
+// File: work/EXP-609-My-Feature.md with id: EXP-609 in frontmatter
+```
+
+This prevents duplicate IDs when multiple agents work concurrently.
 
 ### Claude Code Integration
 
