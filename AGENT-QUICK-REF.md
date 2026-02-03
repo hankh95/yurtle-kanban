@@ -1,0 +1,102 @@
+# Agent Quick Reference Card
+
+Single-page reference for Claude Code agents using yurtle-kanban.
+
+## Session Start
+
+```bash
+/sync                          # Check handoffs, reviews, blocked, recommend action
+```
+
+## Check Status
+
+```bash
+/status                        # Show kanban board
+yurtle-kanban list --status review    # Items needing review
+yurtle-kanban list --status blocked   # Blocked items
+yurtle-kanban stats                   # Board statistics
+```
+
+## Pick Up Work
+
+```bash
+/work EXP-XXX                  # Start work on expedition
+# OR manually:
+yurtle-kanban move EXP-XXX in_progress
+git checkout -b expedition/exp-XXX-description
+```
+
+## Create New Work
+
+```bash
+/expedition "Title here"       # Allocate ID, create file, push
+# OR manually:
+yurtle-kanban next-id EXP --json      # Get next ID atomically
+```
+
+## Complete Work
+
+```bash
+/done                          # Tests, commit, PR, update kanban
+# OR manually:
+git add -A && git commit -m "feat(exp-XXX): Description"
+git push origin HEAD
+gh pr create --title "feat(exp-XXX): Title" --body "..."
+yurtle-kanban move EXP-XXX review
+```
+
+## Review Work
+
+```bash
+/review EXP-XXX                # Check tests, docs, approve/request changes
+```
+
+## Hand Off Work
+
+```bash
+/handoff EXP-XXX agent-b       # Create handoff note, push
+```
+
+## Mark Blocked
+
+```bash
+/blocked EXP-XXX "Reason here" --unblock-by agent-a
+```
+
+## Agent Tags
+
+| Tag | Meaning |
+|-----|---------|
+| `agent-a`, `agent-b`, `agent-c`, `agent-d` | Assigned to specific agent |
+| `dgx-required` | Needs GPU/DGX machine |
+| `mac-compatible` | Can run on Mac |
+| `needs-coordination` | Multi-agent work |
+| `any-agent` | Anyone can pick up |
+
+## Agent Capabilities
+
+| Agent | Machine | Focus |
+|-------|---------|-------|
+| agent-a | DGX | GPU training, heavy compute |
+| agent-b | Mac | Architecture, tooling, docs |
+| agent-c | DGX | GPU training, heavy compute |
+| agent-d | Mac | Architecture, tooling, docs |
+
+## Status Flow
+
+```
+ready -> in_progress -> review -> done
+              |
+              v
+           blocked
+```
+
+## Branch Naming
+
+```
+expedition/exp-XXX-short-description
+feature/name-here
+chore/name-here
+```
+
+Expedition branches are **never deleted** (permanent memory).

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yurtle-kanban"
-version = "0.1.0"
+version = "1.1.0"
 description = "File-based kanban using Yurtle (Turtle RDF in Markdown). Git is your database."
 readme = "README.md"
 license = "MIT"
@@ -23,7 +23,7 @@ keywords = [
     "mcp"
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
@@ -72,11 +72,13 @@ include = [
     "templates/**/*.md",
     "themes/**/*.yaml",
     "examples/**/*",
+    "skills/**/*.md",
 ]
 
 [tool.hatch.build.targets.wheel.shared-data]
 "templates" = "share/yurtle-kanban/templates"
 "themes" = "share/yurtle-kanban/themes"
+"skills" = "share/yurtle-kanban/skills"
 
 [tool.ruff]
 target-version = "py310"

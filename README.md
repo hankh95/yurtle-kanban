@@ -267,6 +267,54 @@ Response: {
 }
 ```
 
+## Claude Code Skills
+
+yurtle-kanban v1.1+ includes Claude Code skills for multi-agent workflows. Skills are markdown files that define reusable agent workflows.
+
+### Available Skills
+
+| Skill | Command | Purpose |
+|-------|---------|---------|
+| `/sync` | Start of session | Pull latest, check handoffs, reviews, blocked items |
+| `/status` | Show kanban board | See what's in progress, ready, blocked |
+| `/work [ID]` | Pick up work | Start work, create branch, update kanban |
+| `/expedition <title>` | Create expedition | Allocate ID, create file, push immediately |
+| `/done [ID]` | Complete work | Run tests, commit, push, create PR, update kanban |
+| `/review ID` | Review expedition | Verify tests, docs, merge readiness |
+| `/handoff ID agent-X` | Hand off work | Pass work to another agent with context |
+| `/blocked ID reason` | Mark blocked | Track why work is blocked and who can unblock |
+
+### Multi-Agent Coordination
+
+With multiple agents working concurrently, use these patterns:
+
+**Agent assignment tags** (in expedition frontmatter):
+```yaml
+tags: [agent-a, dgx-required]     # Assigned to Agent A, needs GPU
+tags: [agent-b, mac-compatible]   # Assigned to Agent B, runs on Mac
+tags: [needs-coordination]        # Requires multiple agents
+tags: [any-agent]                 # Anyone can pick up
+```
+
+**Handoff notes** are created in `kanban-work/handoffs/` when passing work between agents.
+
+**Session start ritual** (`/sync`):
+1. Pull latest from main
+2. Check for handoffs addressed to you
+3. Check items in review
+4. Check blocked items
+5. Recommend next action
+
+### Installing Skills
+
+Skills are included in the package. To use them with Claude Code:
+
+1. Copy the `skills/` directory to your project's `.claude/skills/`
+2. Or install from the package data:
+   ```bash
+   cp -r $(python -c "import yurtle_kanban; print(yurtle_kanban.__path__[0])")/../share/yurtle-kanban/skills .claude/
+   ```
+
 ## Python API
 
 ```python
