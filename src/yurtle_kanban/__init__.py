@@ -23,6 +23,13 @@ Usage:
 
 __version__ = "0.1.0"
 
+# Register yurtle_rdflib plugin with rdflib (enables format="yurtle" parsing)
+# This must be imported before any rdflib Graph.parse() calls with format="yurtle"
+try:
+    import yurtle_rdflib  # noqa: F401
+except ImportError:
+    pass  # yurtle_rdflib is optional; YAML frontmatter still works without it
+
 from yurtle_kanban.config import KanbanConfig
 from yurtle_kanban.models import (
     Board,
