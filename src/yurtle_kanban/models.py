@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 class WorkItemStatus(Enum):
@@ -79,8 +79,8 @@ class Column:
     id: str
     name: str
     order: int
-    wip_limit: Optional[int] = None
-    description: Optional[str] = None
+    wip_limit: int | None = None
+    description: str | None = None
 
     def is_over_wip(self, count: int) -> bool:
         """Check if column is over WIP limit."""
@@ -100,14 +100,14 @@ class WorkItem:
     file_path: Path
 
     # Optional fields
-    priority: Optional[str] = None
-    assignee: Optional[str] = None
-    created: Optional[date] = None
-    updated: Optional[datetime] = None
+    priority: str | None = None
+    assignee: str | None = None
+    created: date | None = None
+    updated: datetime | None = None
     tags: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
     blocks: list[str] = field(default_factory=list)
-    description: Optional[str] = None
+    description: str | None = None
     comments: list[Comment] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 

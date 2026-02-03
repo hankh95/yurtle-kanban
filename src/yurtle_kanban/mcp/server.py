@@ -15,7 +15,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..config import KanbanConfig
 from ..models import WorkItemStatus, WorkItemType
@@ -28,12 +28,12 @@ logger = logging.getLogger("yurtle-kanban-mcp")
 class KanbanMCPServer:
     """MCP Server providing kanban tools for AI agents."""
 
-    def __init__(self, repo_root: Optional[Path] = None):
+    def __init__(self, repo_root: Path | None = None):
         if repo_root is None:
             repo_root = Path.cwd()
 
         self.repo_root = repo_root
-        self._service: Optional[KanbanService] = None
+        self._service: KanbanService | None = None
 
     @property
     def service(self) -> KanbanService:

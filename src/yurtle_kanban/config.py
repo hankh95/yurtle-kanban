@@ -5,7 +5,7 @@ Configuration management for yurtle-kanban.
 import importlib.resources
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -14,7 +14,7 @@ import yaml
 _theme_cache: dict[str, dict[str, Any]] = {}
 
 
-def _load_builtin_theme(theme_name: str, repo_root: Optional[Path] = None) -> Optional[dict[str, Any]]:
+def _load_builtin_theme(theme_name: str, repo_root: Path | None = None) -> dict[str, Any] | None:
     """Load a theme from local .kanban/themes/ or package resources."""
     if theme_name in _theme_cache:
         return _theme_cache[theme_name]
@@ -61,15 +61,15 @@ def _load_builtin_theme(theme_name: str, repo_root: Optional[Path] = None) -> Op
 @dataclass
 class PathConfig:
     """Configuration for work item paths."""
-    root: Optional[str] = "work/"
+    root: str | None = "work/"
     scan_paths: list[str] = field(default_factory=list)
     ignore: list[str] = field(default_factory=lambda: ["**/archive/**", "**/templates/**"])
 
     # Type-specific paths (optional)
-    features: Optional[str] = None
-    bugs: Optional[str] = None
-    epics: Optional[str] = None
-    tasks: Optional[str] = None
+    features: str | None = None
+    bugs: str | None = None
+    epics: str | None = None
+    tasks: str | None = None
 
 
 @dataclass
@@ -148,6 +148,6 @@ class KanbanConfig:
 
         return paths
 
-    def get_theme(self) -> Optional[dict[str, Any]]:
+    def get_theme(self) -> dict[str, Any] | None:
         """Get the theme configuration."""
         return _load_builtin_theme(self.theme)

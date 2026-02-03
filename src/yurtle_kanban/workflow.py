@@ -20,7 +20,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 try:
     import yaml
@@ -83,9 +83,9 @@ class WorkflowConfig:
     states: list[StateConfig] = field(default_factory=list)
     rules: list[TransitionRule] = field(default_factory=list)
     version: int = 1
-    source_file: Optional[str] = None
+    source_file: str | None = None
 
-    def get_state(self, state_id: str) -> Optional[StateConfig]:
+    def get_state(self, state_id: str) -> StateConfig | None:
         """Get state by ID."""
         normalized = state_id.lower().strip().replace(" ", "_").replace("-", "_")
         for state in self.states:
@@ -186,7 +186,7 @@ class WorkflowParser:
 
         return self._workflow_cache
 
-    def load_workflow(self, applies_to: str) -> Optional[WorkflowConfig]:
+    def load_workflow(self, applies_to: str) -> WorkflowConfig | None:
         """Load workflow configuration for an item type."""
         if applies_to in self._workflow_cache:
             return self._workflow_cache[applies_to]
@@ -195,7 +195,7 @@ class WorkflowParser:
         self.load_all_workflows()
         return self._workflow_cache.get(applies_to)
 
-    def parse_workflow_file(self, file_path: Path) -> Optional[WorkflowConfig]:
+    def parse_workflow_file(self, file_path: Path) -> WorkflowConfig | None:
         """Parse a workflow configuration file."""
         content = file_path.read_text(encoding="utf-8")
         frontmatter = self._extract_frontmatter(content)
@@ -246,7 +246,7 @@ class WorkflowParser:
         matches = re.findall(pattern, content, re.DOTALL)
         return matches
 
-    def _extract_title(self, content: str) -> Optional[str]:
+    def _extract_title(self, content: str) -> str | None:
         """Extract first heading as title."""
         for line in content.split("\n"):
             if line.startswith("# "):
@@ -353,7 +353,7 @@ class WorkflowParser:
         self,
         item: WorkItem,
         new_status: WorkItemStatus,
-        workflow: Optional[WorkflowConfig] = None
+        workflow: WorkflowConfig | None = None
     ) -> tuple[bool, str]:
         """
         Validate a status transition against workflow rules.

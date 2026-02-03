@@ -4,15 +4,12 @@ Terminal board rendering using the rich library.
 Provides beautiful terminal-based kanban board visualization.
 """
 
-from typing import Optional
-
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
-from rich import box
 
-from .models import Board, Column, WorkItem, WorkItemStatus
+from .models import Board, WorkItem, WorkItemStatus
 
 
 # Priority colors
@@ -57,7 +54,7 @@ TYPE_ICONS = {
 }
 
 
-def render_board(board: Board, console: Optional[Console] = None) -> None:
+def render_board(board: Board, console: Console | None = None) -> None:
     """Render a kanban board to the terminal."""
     if console is None:
         console = Console()
@@ -177,7 +174,7 @@ def render_card(item: WorkItem) -> Panel:
     )
 
 
-def render_item_detail(item: WorkItem, console: Optional[Console] = None) -> None:
+def render_item_detail(item: WorkItem, console: Console | None = None) -> None:
     """Render detailed view of a single work item."""
     if console is None:
         console = Console()
@@ -231,7 +228,7 @@ def render_item_detail(item: WorkItem, console: Optional[Console] = None) -> Non
     console.print()
 
 
-def render_list(items: list[WorkItem], console: Optional[Console] = None) -> None:
+def render_list(items: list[WorkItem], console: Console | None = None) -> None:
     """Render a list of work items."""
     if console is None:
         console = Console()
@@ -274,7 +271,7 @@ def render_list(items: list[WorkItem], console: Optional[Console] = None) -> Non
     console.print(table)
 
 
-def render_stats(board: Board, console: Optional[Console] = None) -> None:
+def render_stats(board: Board, console: Console | None = None) -> None:
     """Render board statistics."""
     if console is None:
         console = Console()

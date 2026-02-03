@@ -19,14 +19,13 @@ import json
 import shutil
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 from rich.console import Console
 
 from .board import render_board, render_item_detail, render_list, render_stats
 from .config import KanbanConfig
-from .export import export_html, export_markdown, export_json
+from .export import export_html, export_json, export_markdown
 from .models import WorkItemStatus, WorkItemType
 from .service import KanbanService
 
@@ -139,9 +138,9 @@ kanban:
 @click.option("--assignee", "-a", help="Filter by assignee")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def list_items(
-    status: Optional[str],
-    item_type: Optional[str],
-    assignee: Optional[str],
+    status: str | None,
+    item_type: str | None,
+    assignee: str | None,
     as_json: bool,
 ):
     """List work items."""
@@ -192,9 +191,9 @@ def create(
     item_type: str,
     title: str,
     priority: str,
-    assignee: Optional[str],
-    description: Optional[str],
-    tags: Optional[str],
+    assignee: str | None,
+    description: str | None,
+    tags: str | None,
 ):
     """Create a new work item."""
     service = get_service()
@@ -226,7 +225,7 @@ def create(
 @click.argument("new_status")
 @click.option("--no-commit", is_flag=True, help="Don't create git commit")
 @click.option("--message", "-m", help="Custom commit message")
-def move(item_id: str, new_status: str, no_commit: bool, message: Optional[str]):
+def move(item_id: str, new_status: str, no_commit: bool, message: str | None):
     """Move a work item to a new status."""
     service = get_service()
 
@@ -282,7 +281,7 @@ def stats():
 
 @main.command("next")
 @click.option("--assignee", "-a", help="Filter by assignee")
-def next_item(assignee: Optional[str]):
+def next_item(assignee: str | None):
     """Suggest the next item to work on."""
     service = get_service()
 
@@ -331,7 +330,7 @@ def blocked():
               type=click.Choice(["html", "markdown", "json"]),
               help="Export format")
 @click.option("--output", "-o", help="Output file (default: stdout)")
-def export_cmd(fmt: str, output: Optional[str]):
+def export_cmd(fmt: str, output: str | None):
     """Export the board to various formats."""
     service = get_service()
     board = service.get_board()

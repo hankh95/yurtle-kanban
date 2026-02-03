@@ -13,7 +13,7 @@ import re
 import subprocess
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -32,7 +32,7 @@ class KanbanService:
         self.config = config
         self.repo_root = repo_root
         self._items: dict[str, WorkItem] = {}
-        self._board: Optional[Board] = None
+        self._board: Board | None = None
         self._workflow_parser = WorkflowParser(repo_root / ".kanban")
         self._workflows: dict[str, WorkflowConfig] = {}
 
@@ -77,7 +77,7 @@ class KanbanService:
                     return True
         return False
 
-    def _parse_file(self, file_path: Path) -> Optional[WorkItem]:
+    def _parse_file(self, file_path: Path) -> WorkItem | None:
         """Parse a markdown file for work item data."""
         try:
             content = file_path.read_text()
@@ -157,7 +157,7 @@ class KanbanService:
             logger.debug(f"Failed to parse {file_path}: {e}")
             return None
 
-    def _parse_frontmatter(self, content: str) -> Optional[dict[str, Any]]:
+    def _parse_frontmatter(self, content: str) -> dict[str, Any] | None:
         """Parse YAML frontmatter from markdown content."""
         if not content.startswith("---"):
             return None
@@ -171,7 +171,7 @@ class KanbanService:
         except yaml.YAMLError:
             return None
 
-    def _extract_description(self, content: str) -> Optional[str]:
+    def _extract_description(self, content: str) -> str | None:
         """Extract description from markdown content."""
         # Remove frontmatter
         if content.startswith("---"):
@@ -195,7 +195,7 @@ class KanbanService:
         description = "\n".join(description_lines).strip()
         return description if description else None
 
-    def _map_theme_type(self, type_str: str) -> Optional[WorkItemType]:
+    def _map_theme_type(self, type_str: str) -> WorkItemType | None:
         """Map theme-specific type to standard type."""
         theme = self.config.get_theme()
         if theme and "item_types" in theme:
@@ -212,7 +212,7 @@ class KanbanService:
                     return mapping.get(type_id, WorkItemType.TASK)
         return None
 
-    def _map_theme_status(self, status_str: str) -> Optional[WorkItemStatus]:
+    def _map_theme_status(self, status_str: str) -> WorkItemStatus | None:
         """Map theme-specific status to standard status."""
         # Common status mappings across themes
         mapping = {
@@ -301,7 +301,7 @@ class KanbanService:
 
         return sorted(columns, key=lambda c: c.order)
 
-    def get_item(self, item_id: str) -> Optional[WorkItem]:
+    def get_item(self, item_id: str) -> WorkItem | None:
         """Get a work item by ID."""
         if not self._items:
             self.scan()
@@ -309,9 +309,9 @@ class KanbanService:
 
     def get_items(
         self,
-        status: Optional[WorkItemStatus] = None,
-        item_type: Optional[WorkItemType] = None,
-        assignee: Optional[str] = None,
+        status: WorkItemStatus | None = None,
+        item_type: WorkItemType | None = None,
+        assignee: str | None = None,
     ) -> list[WorkItem]:
         """Get items with optional filters."""
         if not self._items:
@@ -332,11 +332,11 @@ class KanbanService:
         self,
         item_type: WorkItemType,
         title: str,
-        path: Optional[Path] = None,
+        path: Path | None = None,
         priority: str = "medium",
-        assignee: Optional[str] = None,
-        description: Optional[str] = None,
-        tags: Optional[list[str]] = None,
+        assignee: str | None = None,
+        description: str | None = None,
+        tags: list[str] | None = None,
     ) -> WorkItem:
         """Create a new work item."""
         # Generate ID
@@ -605,7 +605,7 @@ class KanbanService:
         item_id: str,
         new_status: WorkItemStatus,
         commit: bool = True,
-        message: Optional[str] = None,
+        message: str | None = None,
         validate_workflow: bool = True,
     ) -> WorkItem:
         """Move a work item to a new status.
@@ -710,7 +710,7 @@ class KanbanService:
 
         return to_status in valid_transitions.get(from_status, [])
 
-    def get_workflow(self, item_type: str) -> Optional[WorkflowConfig]:
+    def get_workflow(self, item_type: str) -> WorkflowConfig | None:
         """Get the workflow for a specific item type."""
         return self._workflow_parser.load_workflow(item_type)
 
@@ -807,7 +807,7 @@ class KanbanService:
         """Get items assigned to a specific person."""
         return self.get_items(assignee=assignee)
 
-    def suggest_next_item(self, assignee: Optional[str] = None) -> Optional[WorkItem]:
+    def suggest_next_item(self, assignee: str | None = None) -> WorkItem | None:
         """Suggest the next highest-priority item to work on."""
         items = self.get_items(status=WorkItemStatus.READY)
 
@@ -827,13 +827,13 @@ class KanbanService:
     def update_item(
         self,
         item_id: str,
-        title: Optional[str] = None,
-        priority: Optional[str] = None,
-        assignee: Optional[str] = None,
-        description: Optional[str] = None,
-        tags: Optional[list[str]] = None,
+        title: str | None = None,
+        priority: str | None = None,
+        assignee: str | None = None,
+        description: str | None = None,
+        tags: list[str] | None = None,
         commit: bool = True,
-        message: Optional[str] = None,
+        message: str | None = None,
     ) -> WorkItem:
         """Update a work item's properties (not status - use move_item for that).
 
