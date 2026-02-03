@@ -63,6 +63,14 @@ yurtle-kanban move EXP-XXX review
 /blocked EXP-XXX "Reason here" --unblock-by agent-a
 ```
 
+## Create Release
+
+```bash
+/release patch             # Bug fix: 1.1.0 → 1.1.1
+/release minor             # New feature: 1.1.0 → 1.2.0
+/release major             # Breaking change: 1.1.0 → 2.0.0
+```
+
 ## Agent Tags
 
 | Tag | Meaning |

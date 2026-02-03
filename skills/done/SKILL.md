@@ -64,6 +64,21 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 git push origin HEAD
 ```
 
+### 4b. Version Check (for significant changes)
+
+If this work adds features or fixes bugs, consider bumping the version:
+
+```bash
+# Check current version
+grep version pyproject.toml | head -1
+
+# For bug fixes: bump patch (1.1.0 → 1.1.1)
+# For new features: bump minor (1.1.0 → 1.2.0)
+# For breaking changes: bump major (1.1.0 → 2.0.0)
+```
+
+If version bump is appropriate, use `/release patch` after merging to main.
+
 ### 5. Create PR (required for expedition branches)
 
 Create PR so other agents can see the work is ready for review:

@@ -283,6 +283,7 @@ yurtle-kanban v1.1+ includes Claude Code skills for multi-agent workflows. Skill
 | `/review ID` | Review expedition | Verify tests, docs, merge readiness |
 | `/handoff ID agent-X` | Hand off work | Pass work to another agent with context |
 | `/blocked ID reason` | Mark blocked | Track why work is blocked and who can unblock |
+| `/release [patch\|minor\|major]` | Create release | Bump version, update CHANGELOG, create git tag |
 
 ### Multi-Agent Coordination
 
