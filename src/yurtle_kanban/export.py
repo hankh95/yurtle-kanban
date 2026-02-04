@@ -272,6 +272,276 @@ def export_markdown(board: Board) -> str:
     return "\n".join(lines)
 
 
+def export_expedition_index(board: Board, min_id: int = 600) -> str:
+    """Export an enhanced expedition index with Work Trail and Dependency Tree.
+
+    Features:
+    - Enhanced table with Agent, Depends, For columns
+    - Work Trail (items >= min_id) with dependency hierarchy
+    - Dependency Tree for active development items
+
+    Args:
+        board: The kanban board with all items
+        min_id: Minimum item number for Work Trail section (default: 600)
+
+    Returns:
+        Markdown formatted expedition index
+    """
+    lines = [
+        "# Expedition Index",
+        "",
+        f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
+        "",
+    ]
+
+    # Filter to expedition-type items and sort by ID
+    expeditions = [
+        item for item in board.items
+        if item.item_type.value in ("expedition", "feature", "epic")
+    ]
+    expeditions.sort(key=lambda x: _extract_id_number(x.id), reverse=True)
+
+    # =========================================================================
+    # Section 1: Enhanced Expeditions Table
+    # =========================================================================
+    lines.extend([
+        "## Expeditions",
+        "",
+        "| # | Title | Status | Pri | Agent | Depends | For |",
+        "|---|-------|--------|-----|-------|---------|-----|",
+    ])
+
+    for item in expeditions:
+        num = _extract_id_number(item.id)
+        title = item.title[:50] + "..." if len(item.title) > 50 else item.title
+        status = _status_emoji(item.status)
+        priority = str(item.priority or "medium").upper()[:4]
+        agent = _format_assignee(item.assignee)
+        depends = _format_dependencies(item.depends_on)
+        purpose = _infer_purpose(item.tags)
+
+        lines.append(f"| {num} | {title} | {status} | {priority} | {agent} | {depends} | {purpose} |")
+
+    lines.extend([
+        "",
+        "**Legend:** 🔄 Active | 🟢 Ready | 🟡 Blocked/Harbor | ✅ Done | ❌ Stranded",
+        "",
+    ])
+
+    # =========================================================================
+    # Section 2: Work Trail (items >= min_id)
+    # =========================================================================
+    recent_items = [
+        item for item in expeditions
+        if _extract_id_number(item.id) >= min_id
+    ]
+
+    if recent_items:
+        lines.extend([
+            f"## Work Trail ({min_id} and up)",
+            "",
+            "*What we were trying to do → what we had to do first. Indentation = sidetrack.*",
+            "",
+        ])
+
+        # Build dependency graph for indentation
+        dep_graph = _build_dependency_graph(recent_items)
+
+        # Group by date if available, otherwise by status
+        done_items = [i for i in recent_items if i.status == WorkItemStatus.DONE]
+        active_items = [i for i in recent_items if i.status == WorkItemStatus.IN_PROGRESS]
+        ready_items = [i for i in recent_items if i.status == WorkItemStatus.READY]
+        other_items = [i for i in recent_items if i.status not in (
+            WorkItemStatus.DONE, WorkItemStatus.IN_PROGRESS, WorkItemStatus.READY
+        )]
+
+        # Show active items first
+        for item in active_items:
+            indent = _get_dependency_indent(item, dep_graph)
+            num = _extract_id_number(item.id)
+            status_emoji = "🔄"
+            short_title = item.title.split(":")[0] if ":" in item.title else item.title[:40]
+            deps = _format_dependencies(item.depends_on) or "-"
+            lines.append(f"{indent}- **{item.created or 'WIP'}** {num} {status_emoji} {short_title}")
+            if item.depends_on:
+                lines.append(f"{indent}  - Depends: {deps}")
+
+        # Show ready items
+        for item in ready_items:
+            indent = _get_dependency_indent(item, dep_graph)
+            num = _extract_id_number(item.id)
+            status_emoji = "🟢"
+            short_title = item.title.split(":")[0] if ":" in item.title else item.title[:40]
+            lines.append(f"{indent}- **READY** {num} {status_emoji} {short_title}")
+
+        # Show recently done items (last 10)
+        for item in done_items[:10]:
+            indent = _get_dependency_indent(item, dep_graph)
+            num = _extract_id_number(item.id)
+            status_emoji = "✅"
+            short_title = item.title.split(":")[0] if ":" in item.title else item.title[:40]
+            lines.append(f"{indent}- **DONE** {num} {status_emoji} {short_title}")
+
+        lines.append("")
+
+    # =========================================================================
+    # Section 3: Dependency Tree (active development)
+    # =========================================================================
+    active_or_ready = [
+        item for item in expeditions
+        if item.status in (WorkItemStatus.IN_PROGRESS, WorkItemStatus.READY, WorkItemStatus.REVIEW)
+    ]
+
+    if active_or_ready:
+        lines.extend([
+            "## Dependency Tree (Active Development)",
+            "",
+            "```",
+            "Active Work Dependencies",
+            "│",
+        ])
+
+        # Build tree structure
+        for item in active_or_ready[:15]:  # Limit to 15 items
+            num = _extract_id_number(item.id)
+            short_title = item.title.split(":")[0] if ":" in item.title else item.title[:35]
+            status_str = _status_bracket(item.status)
+            deps = _format_dependencies(item.depends_on) or "none"
+
+            lines.append(f"├── {num} {short_title} [{status_str}]")
+            lines.append(f"│     Depends: {deps}")
+
+        lines.extend([
+            "```",
+            "",
+        ])
+
+    return "\n".join(lines)
+
+
+def _extract_id_number(item_id: str) -> int:
+    """Extract numeric ID from item ID like 'EXP-732'."""
+    import re
+    match = re.search(r'\d+', item_id)
+    return int(match.group()) if match else 0
+
+
+def _status_emoji(status: WorkItemStatus) -> str:
+    """Convert status to emoji indicator."""
+    emoji_map = {
+        WorkItemStatus.DONE: "✅",
+        WorkItemStatus.IN_PROGRESS: "🔄",
+        WorkItemStatus.READY: "🟢",
+        WorkItemStatus.REVIEW: "🔍",
+        WorkItemStatus.BLOCKED: "🟡",
+        WorkItemStatus.BACKLOG: "📋",
+    }
+    return emoji_map.get(status, "⬜")
+
+
+def _status_bracket(status: WorkItemStatus) -> str:
+    """Convert status to bracket indicator."""
+    status_map = {
+        WorkItemStatus.DONE: "DONE",
+        WorkItemStatus.IN_PROGRESS: "ACTIVE",
+        WorkItemStatus.READY: "READY",
+        WorkItemStatus.REVIEW: "REVIEW",
+        WorkItemStatus.BLOCKED: "BLOCKED",
+        WorkItemStatus.BACKLOG: "BACKLOG",
+    }
+    return status_map.get(status, "UNKNOWN")
+
+
+def _format_assignee(assignee: str | None) -> str:
+    """Format assignee for table display."""
+    if not assignee:
+        return "-"
+    # Handle common formats
+    assignee_str = str(assignee)
+    if "agent-a" in assignee_str.lower():
+        return "A"
+    if "agent-b" in assignee_str.lower():
+        return "B"
+    if assignee_str.startswith("<") and assignee_str.endswith(">"):
+        # Handle URIs like <agent-b>
+        inner = assignee_str[1:-1]
+        if "agent-a" in inner.lower():
+            return "A"
+        if "agent-b" in inner.lower():
+            return "B"
+        return inner[:10]
+    return assignee_str[:10]
+
+
+def _format_dependencies(depends_on: list[str]) -> str:
+    """Format dependencies as comma-separated numbers."""
+    if not depends_on:
+        return "-"
+    nums = []
+    for dep in depends_on:
+        num = _extract_id_number(str(dep))
+        if num > 0:
+            status_suffix = ""  # Could add ✅ if we knew the status
+            nums.append(f"{num}{status_suffix}")
+    return ",".join(nums) if nums else "-"
+
+
+def _infer_purpose(tags: list[str]) -> str:
+    """Infer purpose/project from tags."""
+    if not tags:
+        return "-"
+    # Common tag mappings
+    purpose_map = {
+        "v9": "V9",
+        "p108": "P108",
+        "p111": "P111",
+        "p115": "P115",
+        "cog": "COG",
+        "y-layer": "Y-Layer",
+        "training": "Train",
+        "testing": "Test",
+        "mac": "Mac",
+        "gpu": "GPU",
+        "performance": "Perf",
+        "tooling": "Tool",
+    }
+    purposes = []
+    for tag in tags:
+        tag_lower = tag.lower()
+        for key, val in purpose_map.items():
+            if key in tag_lower:
+                purposes.append(val)
+                break
+    return ",".join(purposes[:2]) if purposes else tags[0][:6] if tags else "-"
+
+
+def _build_dependency_graph(items: list[WorkItem]) -> dict[str, list[str]]:
+    """Build a graph of item dependencies."""
+    graph: dict[str, list[str]] = {}
+    for item in items:
+        item_num = str(_extract_id_number(item.id))
+        dep_nums = [str(_extract_id_number(d)) for d in item.depends_on]
+        graph[item_num] = dep_nums
+    return graph
+
+
+def _get_dependency_indent(item: WorkItem, dep_graph: dict[str, list[str]]) -> str:
+    """Calculate indent based on dependency depth."""
+    # Simple heuristic: if this item is depended on by others, no indent
+    # If this item depends on others, indent
+    item_num = str(_extract_id_number(item.id))
+
+    # Check if any item depends on this one
+    is_depended_on = any(item_num in deps for deps in dep_graph.values())
+
+    if is_depended_on:
+        return ""
+    elif item.depends_on:
+        return "  "
+    else:
+        return ""
+
+
 def export_json(board: Board) -> str:
     """Export board to JSON format."""
     data: dict[str, Any] = {

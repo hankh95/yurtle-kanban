@@ -25,7 +25,7 @@ from rich.console import Console
 
 from .board import render_board, render_item_detail, render_list, render_stats
 from .config import KanbanConfig
-from .export import export_html, export_json, export_markdown
+from .export import export_html, export_json, export_markdown, export_expedition_index
 from .models import WorkItemStatus, WorkItemType
 from .service import KanbanService
 
@@ -327,11 +327,19 @@ def blocked():
 
 @main.command("export")
 @click.option("--format", "-f", "fmt", required=True,
-              type=click.Choice(["html", "markdown", "json"]),
+              type=click.Choice(["html", "markdown", "json", "expedition-index"]),
               help="Export format")
 @click.option("--output", "-o", help="Output file (default: stdout)")
-def export_cmd(fmt: str, output: str | None):
-    """Export the board to various formats."""
+@click.option("--min-id", default=600, help="Minimum ID for Work Trail (expedition-index only)")
+def export_cmd(fmt: str, output: str | None, min_id: int):
+    """Export the board to various formats.
+
+    Formats:
+    - html: Standalone HTML board view
+    - markdown: Simple markdown table
+    - json: JSON for integrations
+    - expedition-index: Enhanced index with Work Trail and Dependency Tree
+    """
     service = get_service()
     board = service.get_board()
 
@@ -341,6 +349,8 @@ def export_cmd(fmt: str, output: str | None):
         content = export_markdown(board)
     elif fmt == "json":
         content = export_json(board)
+    elif fmt == "expedition-index":
+        content = export_expedition_index(board, min_id=min_id)
     else:
         console.print(f"[red]Unknown format: {fmt}[/red]")
         sys.exit(1)
