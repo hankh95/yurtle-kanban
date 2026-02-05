@@ -520,7 +520,7 @@ def _build_dependency_graph(items: list[WorkItem]) -> dict[str, list[str]]:
     graph: dict[str, list[str]] = {}
     for item in items:
         item_num = str(_extract_id_number(item.id))
-        dep_nums = [str(_extract_id_number(d)) for d in item.depends_on]
+        dep_nums = [str(_extract_id_number(d)) for d in (item.depends_on or [])]
         graph[item_num] = dep_nums
     return graph
 
