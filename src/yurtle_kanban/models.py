@@ -189,7 +189,11 @@ class WorkItem:
         return '\n'.join(lines)
 
     def to_markdown(self) -> str:
-        """Generate full markdown file content."""
+        """Generate full markdown file content.
+
+        Format: Frontmatter (single source of truth) + Title + Content.
+        No duplicate formatted sections. No yurtle blocks.
+        """
         lines = [
             "---",
             f'id: {self.id}',
@@ -207,6 +211,12 @@ class WorkItem:
         if self.tags:
             lines.append(f'tags: [{", ".join(self.tags)}]')
 
+        # Always include depends_on (even if empty)
+        if self.depends_on:
+            lines.append(f'depends_on: [{", ".join(self.depends_on)}]')
+        else:
+            lines.append('depends_on: []')
+
         lines.extend([
             "---",
             "",
@@ -216,13 +226,6 @@ class WorkItem:
 
         if self.description:
             lines.append(self.description)
-            lines.append("")
-
-        lines.extend([
-            "```yurtle",
-            self.to_yurtle(),
-            "```",
-        ])
 
         return '\n'.join(lines)
 
