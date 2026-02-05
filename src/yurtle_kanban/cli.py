@@ -227,13 +227,15 @@ def create(
 @click.option("--message", "-m", help="Custom commit message")
 @click.option("--assign", "-a", help="Set assignee (e.g., 'Claude-M5', 'Claude-DGX')")
 @click.option("--export-board", "-e", help="Export board to file after move (e.g., 'kanban-work/KANBAN-BOARD.md')")
-def move(item_id: str, new_status: str, no_commit: bool, message: str | None, assign: str | None, export_board: str | None):
+@click.option("--force", "-f", is_flag=True, help="Skip WIP limit and workflow validation")
+def move(item_id: str, new_status: str, no_commit: bool, message: str | None, assign: str | None, export_board: str | None, force: bool):
     """Move a work item to a new status.
 
     Examples:
         yurtle-kanban move EXP-123 in_progress
         yurtle-kanban move EXP-123 in_progress --assign "Claude-M5"
         yurtle-kanban move EXP-123 done --export-board kanban-work/KANBAN-BOARD.md
+        yurtle-kanban move EXP-123 ready --force  # Skip WIP limit check
     """
     service = get_service()
 
@@ -251,6 +253,7 @@ def move(item_id: str, new_status: str, no_commit: bool, message: str | None, as
             commit=not no_commit,
             message=message,
             assignee=assign,
+            skip_wip_check=force,
         )
         console.print(f"[green]Moved {item.id} to {status.value}[/green]")
         if assign:

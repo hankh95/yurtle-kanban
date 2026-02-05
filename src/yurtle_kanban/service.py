@@ -608,6 +608,7 @@ class KanbanService:
         message: str | None = None,
         validate_workflow: bool = True,
         assignee: str | None = None,
+        skip_wip_check: bool = False,
     ) -> WorkItem:
         """Move a work item to a new status.
 
@@ -618,6 +619,7 @@ class KanbanService:
             message: Optional commit message
             validate_workflow: Whether to validate against workflow rules
             assignee: Optional assignee to set (e.g., 'Claude-M5', 'Claude-DGX')
+            skip_wip_check: Whether to skip WIP limit validation
         """
         item = self.get_item(item_id)
         if not item:
@@ -631,15 +633,16 @@ class KanbanService:
             if not valid:
                 raise ValueError(error_msg)
 
-        # Check WIP limits
-        board = self.get_board()
-        for col in board.columns:
-            if col.id == new_status.value:
-                current_count = len(board.get_items_by_status(new_status))
-                if col.wip_limit and current_count >= col.wip_limit:
-                    raise ValueError(
-                        f"WIP limit reached for {col.name} ({current_count}/{col.wip_limit})"
-                    )
+        # Check WIP limits (unless skipped)
+        if not skip_wip_check:
+            board = self.get_board()
+            for col in board.columns:
+                if col.id == new_status.value:
+                    current_count = len(board.get_items_by_status(new_status))
+                    if col.wip_limit and current_count >= col.wip_limit:
+                        raise ValueError(
+                            f"WIP limit reached for {col.name} ({current_count}/{col.wip_limit})"
+                        )
 
         # Update item
         item.status = new_status
