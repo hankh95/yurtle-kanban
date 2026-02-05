@@ -225,8 +225,16 @@ def create(
 @click.argument("new_status")
 @click.option("--no-commit", is_flag=True, help="Don't create git commit")
 @click.option("--message", "-m", help="Custom commit message")
-def move(item_id: str, new_status: str, no_commit: bool, message: str | None):
-    """Move a work item to a new status."""
+@click.option("--assign", "-a", help="Set assignee (e.g., 'Claude-M5', 'Claude-DGX')")
+@click.option("--export-board", "-e", help="Export board to file after move (e.g., 'kanban-work/KANBAN-BOARD.md')")
+def move(item_id: str, new_status: str, no_commit: bool, message: str | None, assign: str | None, export_board: str | None):
+    """Move a work item to a new status.
+
+    Examples:
+        yurtle-kanban move EXP-123 in_progress
+        yurtle-kanban move EXP-123 in_progress --assign "Claude-M5"
+        yurtle-kanban move EXP-123 done --export-board kanban-work/KANBAN-BOARD.md
+    """
     service = get_service()
 
     try:
@@ -242,11 +250,21 @@ def move(item_id: str, new_status: str, no_commit: bool, message: str | None):
             status,
             commit=not no_commit,
             message=message,
+            assignee=assign,
         )
         console.print(f"[green]Moved {item.id} to {status.value}[/green]")
+        if assign:
+            console.print(f"  Assigned to: {assign}")
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
+
+    # Export board if requested
+    if export_board:
+        board = service.get_board()
+        content = export_expedition_index(board, min_id=600)
+        Path(export_board).write_text(content)
+        console.print(f"[green]Exported board to {export_board}[/green]")
 
 
 @main.command()

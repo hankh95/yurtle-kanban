@@ -607,6 +607,7 @@ class KanbanService:
         commit: bool = True,
         message: str | None = None,
         validate_workflow: bool = True,
+        assignee: str | None = None,
     ) -> WorkItem:
         """Move a work item to a new status.
 
@@ -616,6 +617,7 @@ class KanbanService:
             commit: Whether to git commit the change
             message: Optional commit message
             validate_workflow: Whether to validate against workflow rules
+            assignee: Optional assignee to set (e.g., 'Claude-M5', 'Claude-DGX')
         """
         item = self.get_item(item_id)
         if not item:
@@ -643,15 +645,21 @@ class KanbanService:
         item.status = new_status
         item.updated = datetime.now()
 
+        # Update assignee if provided
+        if assignee:
+            item.assignee = assignee
+
         # Update file
         self._update_item_file(item)
 
         # Git commit if requested
         if commit:
-            self._git_commit(
-                item.file_path,
-                message or f"Move {item_id} to {new_status.value}",
-            )
+            commit_msg = message
+            if not commit_msg:
+                commit_msg = f"Move {item_id} to {new_status.value}"
+                if assignee:
+                    commit_msg += f" (assigned to {assignee})"
+            self._git_commit(item.file_path, commit_msg)
 
         return item
 
