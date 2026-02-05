@@ -649,8 +649,8 @@ class KanbanService:
         if assignee:
             item.assignee = assignee
 
-        # Update file
-        self._update_item_file(item)
+        # Update file with status history
+        self._update_item_file_with_history(item, old_status, new_status, assignee)
 
         # Git commit if requested
         if commit:
@@ -748,6 +748,87 @@ class KanbanService:
         """Update the work item file with current state."""
         item.file_path.write_text(item.to_markdown())
 
+    def _update_item_file_with_history(
+        self,
+        item: WorkItem,
+        old_status: WorkItemStatus,
+        new_status: WorkItemStatus,
+        assignee: str | None = None,
+    ) -> None:
+        """Update file and append status change to yurtle knowledge block.
+
+        Status history is stored in TTL (Turtle RDF) format:
+        ```yurtle
+        @prefix kb: <https://yurtle.dev/kanban/> .
+        @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+        <> kb:statusChange [
+            kb:status kb:ready ;
+            kb:at "2024-01-15T10:30:00"^^xsd:dateTime ;
+            kb:by "Claude-M5" ;
+        ] .
+        ```
+        """
+        content = item.file_path.read_text()
+
+        # Update frontmatter for status and assignee
+        content = self._update_frontmatter_field(content, "status", new_status.value)
+        if assignee:
+            content = self._update_frontmatter_field(content, "assignee", assignee)
+
+        # Create TTL status change entry
+        timestamp = datetime.now().isoformat(timespec='seconds')
+        agent = assignee or self._get_git_user()
+        ttl_entry = f'''    kb:status kb:{new_status.value} ;
+    kb:at "{timestamp}"^^xsd:dateTime ;
+    kb:by "{agent}" ;'''
+
+        # Check if yurtle block with status changes exists
+        import re
+        # Match block with prefix declarations and statusChange predicates
+        yurtle_pattern = r"```yurtle\n@prefix kb: <https://yurtle\.dev/kanban/> \.\n@prefix xsd: <http://www\.w3\.org/2001/XMLSchema#> \.\n\n<> kb:statusChange(.*?)\.\n```"
+        match = re.search(yurtle_pattern, content, re.DOTALL)
+
+        if match:
+            # Append to existing block - add new blank node
+            existing = match.group(1).rstrip()
+            # Remove trailing period and add comma for new entry
+            new_block = f'''```yurtle
+@prefix kb: <https://yurtle.dev/kanban/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<> kb:statusChange{existing.rstrip(" ;")},
+  [
+{ttl_entry}
+  ] .
+```'''
+            content = content[:match.start()] + new_block + content[match.end():]
+        else:
+            # Add new yurtle block at end
+            new_block = f'''```yurtle
+@prefix kb: <https://yurtle.dev/kanban/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<> kb:statusChange [
+{ttl_entry}
+  ] .
+```'''
+            content = content.rstrip() + "\n\n" + new_block + "\n"
+
+        item.file_path.write_text(content)
+
+    def _update_frontmatter_field(self, content: str, field: str, value: str) -> str:
+        """Update a single field in the frontmatter."""
+        import re
+        pattern = rf"^{field}:.*$"
+        replacement = f"{field}: {value}"
+        # Only replace in frontmatter (between first two ---)
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            parts[1] = re.sub(pattern, replacement, parts[1], flags=re.MULTILINE)
+            return "---".join(parts)
+        return content
+
     def _git_commit(self, file_path: Path, message: str) -> None:
         """Commit changes to git."""
         try:
@@ -806,6 +887,142 @@ class KanbanService:
         content += f"\n### {comment.author} ({timestamp})\n\n{comment.content}\n"
 
         item.file_path.write_text(content)
+
+    def get_status_history(self, item_id: str) -> list[dict[str, Any]]:
+        """Get status history for an item.
+
+        Returns list of dicts: [{'status': str, 'at': datetime, 'by': str}, ...]
+
+        Parses TTL (Turtle RDF) format in yurtle blocks:
+        ```yurtle
+        @prefix kb: <https://yurtle.dev/kanban/> .
+        @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+        <> kb:statusChange [
+            kb:status kb:ready ;
+            kb:at "2024-01-15T10:30:00"^^xsd:dateTime ;
+            kb:by "Claude-M5" ;
+        ] .
+        ```
+        """
+        item = self.get_item(item_id)
+        if not item:
+            return []
+
+        content = item.file_path.read_text()
+
+        # Parse yurtle block with TTL format
+        import re
+
+        # Find yurtle blocks
+        yurtle_blocks = re.findall(r"```yurtle\n(.*?)```", content, re.DOTALL)
+        if not yurtle_blocks:
+            return []
+
+        history = []
+
+        for block in yurtle_blocks:
+            # Find all blank nodes with statusChange data
+            # Pattern matches: kb:status kb:XXX ; kb:at "..." ; kb:by "..." ;
+            entry_pattern = r'kb:status kb:(\w+)\s*;\s*kb:at "([^"]+)"(?:\^\^xsd:dateTime)?\s*;\s*kb:by "([^"]+)"'
+            for entry_match in re.finditer(entry_pattern, block):
+                try:
+                    history.append({
+                        "status": entry_match.group(1),
+                        "at": datetime.fromisoformat(entry_match.group(2)),
+                        "by": entry_match.group(3),
+                    })
+                except ValueError:
+                    pass
+
+        return history
+
+    def get_flow_metrics(self, item_id: str) -> dict[str, Any]:
+        """Calculate flow metrics for an item.
+
+        Returns:
+            cycle_time: Time from in_progress to done (working time)
+            lead_time: Time from ready to done (total queue + work time)
+            time_in_status: Dict of status -> hours spent
+        """
+        history = self.get_status_history(item_id)
+        if not history:
+            return {"error": "No status history found"}
+
+        metrics: dict[str, Any] = {
+            "item_id": item_id,
+            "transitions": len(history),
+            "time_in_status": {},
+            "cycle_time_hours": None,
+            "lead_time_hours": None,
+        }
+
+        # Calculate time in each status
+        for i, entry in enumerate(history):
+            status = entry["status"]
+            start_time = entry["at"]
+
+            # End time is next transition or now
+            if i + 1 < len(history):
+                end_time = history[i + 1]["at"]
+            else:
+                end_time = datetime.now()
+
+            hours = (end_time - start_time).total_seconds() / 3600
+            metrics["time_in_status"][status] = metrics["time_in_status"].get(status, 0) + hours
+
+        # Calculate cycle time (in_progress to done)
+        in_progress_time = None
+        done_time = None
+        for entry in history:
+            if entry["status"] == "in_progress" and in_progress_time is None:
+                in_progress_time = entry["at"]
+            if entry["status"] == "done":
+                done_time = entry["at"]
+
+        if in_progress_time and done_time:
+            metrics["cycle_time_hours"] = (done_time - in_progress_time).total_seconds() / 3600
+
+        # Calculate lead time (ready to done)
+        ready_time = None
+        for entry in history:
+            if entry["status"] == "ready" and ready_time is None:
+                ready_time = entry["at"]
+
+        if ready_time and done_time:
+            metrics["lead_time_hours"] = (done_time - ready_time).total_seconds() / 3600
+
+        return metrics
+
+    def get_board_metrics(self) -> dict[str, Any]:
+        """Calculate aggregate flow metrics for the board."""
+        board = self.get_board()
+
+        total_cycle_time = 0
+        total_lead_time = 0
+        cycle_time_count = 0
+        lead_time_count = 0
+        total_time_in_status: dict[str, float] = {}
+
+        for item in board.items:
+            metrics = self.get_flow_metrics(item.id)
+            if "error" not in metrics:
+                if metrics["cycle_time_hours"]:
+                    total_cycle_time += metrics["cycle_time_hours"]
+                    cycle_time_count += 1
+                if metrics["lead_time_hours"]:
+                    total_lead_time += metrics["lead_time_hours"]
+                    lead_time_count += 1
+                for status, hours in metrics.get("time_in_status", {}).items():
+                    total_time_in_status[status] = total_time_in_status.get(status, 0) + hours
+
+        return {
+            "total_items": len(board.items),
+            "items_with_history": cycle_time_count,
+            "avg_cycle_time_hours": total_cycle_time / cycle_time_count if cycle_time_count else None,
+            "avg_lead_time_hours": total_lead_time / lead_time_count if lead_time_count else None,
+            "total_time_in_status": total_time_in_status,
+        }
 
     def get_blocked_items(self) -> list[WorkItem]:
         """Get all blocked items."""

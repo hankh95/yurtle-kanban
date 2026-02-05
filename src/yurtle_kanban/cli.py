@@ -343,6 +343,91 @@ def blocked():
     render_list(items, console)
 
 
+@main.command()
+@click.argument("item_id", required=False)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def metrics(item_id: str | None, as_json: bool):
+    """Show flow metrics for an item or the board.
+
+    Flow metrics track time spent in each status to help identify bottlenecks.
+    Status history is automatically recorded when items move between statuses.
+
+    Examples:
+        yurtle-kanban metrics           # Board-wide metrics
+        yurtle-kanban metrics EXP-123   # Metrics for a specific item
+    """
+    service = get_service()
+
+    if item_id:
+        # Single item metrics
+        metrics_data = service.get_flow_metrics(item_id.upper())
+
+        if "error" in metrics_data:
+            console.print(f"[yellow]{metrics_data['error']}[/yellow]")
+            console.print("[dim]Status history is recorded when items move between statuses.[/dim]")
+            return
+
+        if as_json:
+            click.echo(json.dumps(metrics_data, indent=2, default=str))
+        else:
+            console.print(f"[bold]Flow Metrics: {item_id.upper()}[/bold]")
+            console.print()
+
+            if metrics_data.get("cycle_time_hours"):
+                hours = metrics_data["cycle_time_hours"]
+                if hours < 24:
+                    console.print(f"  Cycle Time: {hours:.1f} hours")
+                else:
+                    console.print(f"  Cycle Time: {hours/24:.1f} days")
+
+            if metrics_data.get("lead_time_hours"):
+                hours = metrics_data["lead_time_hours"]
+                if hours < 24:
+                    console.print(f"  Lead Time: {hours:.1f} hours")
+                else:
+                    console.print(f"  Lead Time: {hours/24:.1f} days")
+
+            console.print(f"  Transitions: {metrics_data['transitions']}")
+            console.print()
+
+            if metrics_data.get("time_in_status"):
+                console.print("  [bold]Time in Status:[/bold]")
+                for status, hours in sorted(metrics_data["time_in_status"].items()):
+                    if hours < 24:
+                        console.print(f"    {status}: {hours:.1f} hours")
+                    else:
+                        console.print(f"    {status}: {hours/24:.1f} days")
+    else:
+        # Board-wide metrics
+        metrics_data = service.get_board_metrics()
+
+        if as_json:
+            click.echo(json.dumps(metrics_data, indent=2, default=str))
+        else:
+            console.print("[bold]Board Flow Metrics[/bold]")
+            console.print()
+            console.print(f"  Total Items: {metrics_data['total_items']}")
+            console.print(f"  Items with History: {metrics_data['items_with_history']}")
+
+            if metrics_data.get("avg_cycle_time_hours"):
+                hours = metrics_data["avg_cycle_time_hours"]
+                if hours < 24:
+                    console.print(f"  Avg Cycle Time: {hours:.1f} hours")
+                else:
+                    console.print(f"  Avg Cycle Time: {hours/24:.1f} days")
+
+            if metrics_data.get("avg_lead_time_hours"):
+                hours = metrics_data["avg_lead_time_hours"]
+                if hours < 24:
+                    console.print(f"  Avg Lead Time: {hours:.1f} hours")
+                else:
+                    console.print(f"  Avg Lead Time: {hours/24:.1f} days")
+
+            if not metrics_data.get("items_with_history"):
+                console.print()
+                console.print("[dim]No status history yet. History is recorded when items move.[/dim]")
+
+
 @main.command("export")
 @click.option("--format", "-f", "fmt", required=True,
               type=click.Choice(["html", "markdown", "json", "expedition-index"]),
