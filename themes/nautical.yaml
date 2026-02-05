@@ -48,19 +48,19 @@ columns:
   ready:
     name: "Provisioning"
     order: 2
-    wip_limit: 3
+    wip_limit: 50
     description: "Gathering resources"
 
   in_progress:
     name: "Underway"
     order: 3
-    wip_limit: 2
+    wip_limit: 10
     description: "Active work"
 
   review:
     name: "Approaching Port"
     order: 4
-    wip_limit: 2
+    wip_limit: 10
     description: "Nearly complete"
 
   done:
