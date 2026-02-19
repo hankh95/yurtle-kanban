@@ -271,6 +271,155 @@ def render_list(items: list[WorkItem], console: Console | None = None) -> None:
     console.print(table)
 
 
+def render_roadmap(
+    items: list[WorkItem],
+    console: Console | None = None,
+    by_type: bool = False,
+) -> None:
+    """Render a prioritized roadmap view."""
+    if console is None:
+        console = Console()
+
+    console.print()
+    console.print("[bold]Roadmap[/bold]")
+    console.print()
+
+    if not items:
+        console.print("[dim]No items to show.[/dim]")
+        return
+
+    if by_type:
+        # Group by type
+        groups: dict[str, list[WorkItem]] = {}
+        for item in items:
+            key = item.item_type.value
+            groups.setdefault(key, []).append(item)
+
+        for type_name, group_items in groups.items():
+            icon = TYPE_ICONS.get(type_name, "•")
+            console.print(f"\n[bold]{icon} {type_name.title()}s[/bold]")
+            _render_roadmap_table(group_items, console)
+    else:
+        _render_roadmap_table(items, console)
+
+    console.print()
+
+
+def _render_roadmap_table(items: list[WorkItem], console: Console) -> None:
+    """Render a roadmap table for a group of items."""
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("#", style="dim", width=3)
+    table.add_column("ID", style="cyan")
+    table.add_column("Title")
+    table.add_column("Priority")
+    table.add_column("Status")
+    table.add_column("Assignee", style="dim")
+
+    for i, item in enumerate(items, 1):
+        priority_color = PRIORITY_COLORS.get(item.priority or "medium", "white")
+        status_color = STATUS_COLORS.get(item.status.value, "white")
+
+        title = item.title
+        if len(title) > 45:
+            title = title[:42] + "..."
+
+        assignee = item.assignee
+        if isinstance(assignee, list):
+            assignee = ", ".join(str(a) for a in assignee if a)
+        assignee = assignee or "-"
+
+        table.add_row(
+            str(i),
+            item.id,
+            title,
+            f"[{priority_color}]{item.priority or 'medium'}[/{priority_color}]",
+            f"[{status_color}]{item.status.value}[/{status_color}]",
+            assignee,
+        )
+
+    console.print(table)
+
+
+def render_history(
+    items: list[WorkItem],
+    console: Console | None = None,
+    by_assignee: bool = False,
+    by_type: bool = False,
+) -> None:
+    """Render completed work history."""
+    if console is None:
+        console = Console()
+
+    console.print()
+    console.print("[bold]Work History (Done)[/bold]")
+    console.print()
+
+    if not items:
+        console.print("[dim]No completed items found.[/dim]")
+        return
+
+    if by_assignee:
+        groups: dict[str, list[WorkItem]] = {}
+        for item in items:
+            key = item.assignee or "unassigned"
+            groups.setdefault(key, []).append(item)
+
+        for assignee_name, group_items in groups.items():
+            console.print(f"\n[bold]@{assignee_name}[/bold] ({len(group_items)} items)")
+            _render_history_table(group_items, console)
+    elif by_type:
+        groups2: dict[str, list[WorkItem]] = {}
+        for item in items:
+            key = item.item_type.value
+            groups2.setdefault(key, []).append(item)
+
+        for type_name, group_items in groups2.items():
+            icon = TYPE_ICONS.get(type_name, "•")
+            console.print(f"\n[bold]{icon} {type_name.title()}s[/bold] ({len(group_items)} items)")
+            _render_history_table(group_items, console)
+    else:
+        _render_history_table(items, console)
+
+    # Summary stats
+    console.print()
+    console.print(f"[bold]Total completed:[/bold] {len(items)}")
+    if items:
+        assignees = set(i.assignee for i in items if i.assignee)
+        if assignees:
+            console.print(f"[bold]Contributors:[/bold] {', '.join(sorted(assignees))}")
+
+    console.print()
+
+
+def _render_history_table(items: list[WorkItem], console: Console) -> None:
+    """Render a history table for a group of items."""
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("ID", style="cyan")
+    table.add_column("Title")
+    table.add_column("Completed", style="dim")
+    table.add_column("Assignee", style="dim")
+
+    for item in items:
+        title = item.title
+        if len(title) > 45:
+            title = title[:42] + "..."
+
+        completed = ""
+        if item.updated:
+            completed = item.updated.strftime("%Y-%m-%d")
+        elif item.created:
+            completed = str(item.created)
+
+        assignee = item.assignee
+        if isinstance(assignee, list):
+            assignee = ", ".join(str(a) for a in assignee if a)
+        assignee = assignee or "-"
+
+        table.add_row(item.id, title, completed, assignee)
+
+    console.print(table)
+
+
 def render_stats(board: Board, console: Console | None = None) -> None:
     """Render board statistics."""
     if console is None:

@@ -11,6 +11,8 @@ Usage:
     yurtle-kanban show ID
     yurtle-kanban board
     yurtle-kanban stats
+    yurtle-kanban roadmap [--by-type] [--type TYPE] [--export md]
+    yurtle-kanban history [--week] [--month] [--since DATE] [--by-assignee]
     yurtle-kanban next [--assignee ASSIGNEE]
     yurtle-kanban export --format FORMAT [--output FILE]
 """
@@ -23,7 +25,7 @@ from pathlib import Path
 import click
 from rich.console import Console
 
-from .board import render_board, render_item_detail, render_list, render_stats
+from .board import render_board, render_history, render_item_detail, render_list, render_roadmap, render_stats
 from .config import KanbanConfig
 from .export import export_html, export_json, export_markdown, export_expedition_index
 from .models import WorkItemStatus, WorkItemType
@@ -72,11 +74,50 @@ def main():
     pass
 
 
+def _generate_template(prefix: str, type_name: str, sections: list[str]) -> str:
+    """Generate a _TEMPLATE.md file for an item type."""
+    section_text = "\n\n".join(f"## {s}\n" for s in sections)
+    return f"""---
+id: {prefix}-XXX
+title: ""
+status: backlog
+created: YYYY-MM-DD
+priority: medium
+assignee:
+tags: []
+related: []
+---
+
+# {prefix}-XXX: Title
+
+{section_text}"""
+
+
+# Template sections per item type
+_TEMPLATE_SECTIONS: dict[str, list[str]] = {
+    # Software theme
+    "feature": ["Goal", "Acceptance Criteria"],
+    "bug": ["Description", "Steps to Reproduce", "Expected Behavior", "Actual Behavior"],
+    "epic": ["Goal", "Scope", "Milestones"],
+    "issue": ["Description", "Context"],
+    "task": ["Goal", "Steps", "Acceptance Criteria"],
+    "idea": ["Description", "Motivation"],
+    # Nautical theme
+    "expedition": ["Context", "Plan", "Definition of Done"],
+    "voyage": ["Vision", "Expeditions", "Success Criteria"],
+    "chore": ["Description"],
+    "hazard": ["Description", "Impact", "Mitigation"],
+    "signal": ["Observation", "Potential Value"],
+}
+
+
 @main.command()
 @click.option("--theme", default="software", help="Theme: software, nautical, or custom")
 @click.option("--path", default="work/", help="Path for work items")
 def init(theme: str, path: str):
     """Initialize yurtle-kanban in the current directory."""
+    from .config import _load_builtin_theme
+
     repo_root = Path.cwd()
 
     # Create .kanban directory structure
@@ -85,51 +126,75 @@ def init(theme: str, path: str):
     (kanban_dir / "workflows").mkdir(exist_ok=True)
     (kanban_dir / "templates").mkdir(exist_ok=True)
 
-    # Create config.yaml
+    # Load theme to discover item types and paths
+    theme_data = _load_builtin_theme(theme, repo_root)
+    item_types = theme_data.get("item_types", {}) if theme_data else {}
+
+    # Scaffold type-specific directories with templates
+    scan_paths = []
+    dirs_created = []
+    for type_id, type_def in item_types.items():
+        type_path = type_def.get("path")
+        if type_path:
+            type_dir = repo_root / type_path
+            type_dir.mkdir(parents=True, exist_ok=True)
+            scan_paths.append(type_path)
+            dirs_created.append(type_path)
+
+            # Create _TEMPLATE.md in each directory
+            prefix = type_def.get("id_prefix", type_id[:4].upper())
+            sections = _TEMPLATE_SECTIONS.get(type_id, ["Description"])
+            template_path = type_dir / "_TEMPLATE.md"
+            if not template_path.exists():
+                template_path.write_text(_generate_template(prefix, type_id, sections))
+
+    # Create config.yaml with auto-populated scan_paths
+    scan_paths_yaml = "\n".join(f'    - "{p}"' for p in scan_paths)
     config_content = f"""# yurtle-kanban configuration
 kanban:
   theme: {theme}
 
   paths:
     root: {path}
-
-  # scan_paths:
-  #   - {path}
-  #   - specs/
+    scan_paths:
+{scan_paths_yaml}
 
   ignore:
     - "**/archive/**"
     - "**/templates/**"
+    - "**/_TEMPLATE*"
 """
     config_path = kanban_dir / "config.yaml"
     config_path.write_text(config_content)
 
-    # Copy templates for the selected theme
+    # Copy any additional theme templates
     templates_src = _get_templates_dir()
     theme_templates = templates_src / theme
     templates_copied = 0
-
     if theme_templates.exists():
         templates_dst = kanban_dir / "templates"
         for template_file in theme_templates.glob("*.md"):
             shutil.copy(template_file, templates_dst / template_file.name)
             templates_copied += 1
 
-    # Create work directory
+    # Create root work directory (fallback)
     work_dir = repo_root / path
     work_dir.mkdir(parents=True, exist_ok=True)
-    (work_dir / ".gitkeep").touch()
 
     console.print(f"[green]Initialized yurtle-kanban with theme '{theme}'[/green]")
-    console.print(f"  Created: .kanban/config.yaml")
-    console.print(f"  Created: .kanban/templates/ ({templates_copied} templates)")
-    console.print(f"  Created: .kanban/workflows/")
-    console.print(f"  Created: {path}")
+    console.print(f"  Config:  .kanban/config.yaml")
+    if dirs_created:
+        for d in dirs_created:
+            console.print(f"  Created: {d} (with _TEMPLATE.md)")
+    else:
+        console.print(f"  Created: {path}")
+    if templates_copied:
+        console.print(f"  Copied:  {templates_copied} templates to .kanban/templates/")
     console.print()
     console.print("Next steps:")
-    console.print(f"  1. Create work items: yurtle-kanban create feature 'My feature'")
+    example_type = list(item_types.keys())[0] if item_types else "feature"
+    console.print(f"  1. Create work items: yurtle-kanban create {example_type} 'My item'")
     console.print(f"  2. View board: yurtle-kanban board")
-    console.print(f"  3. Customize templates in .kanban/templates/")
 
 
 @main.command("list")
@@ -298,6 +363,121 @@ def stats():
     service = get_service()
     board = service.get_board()
     render_stats(board, console)
+
+
+@main.command()
+@click.option("--by-type", is_flag=True, help="Group by item type")
+@click.option("--type", "-t", "item_type", help="Filter to a single item type")
+@click.option("--export", "-e", "export_fmt", type=click.Choice(["md"]), help="Export as markdown")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def roadmap(by_type: bool, item_type: str | None, export_fmt: str | None, as_json: bool):
+    """Show a prioritized roadmap of all work items.
+
+    Displays all non-done items sorted by priority (critical first).
+    Use --by-type to group by item type.
+
+    Examples:
+        yurtle-kanban roadmap
+        yurtle-kanban roadmap --by-type
+        yurtle-kanban roadmap --type expedition
+        yurtle-kanban roadmap --export md
+    """
+    service = get_service()
+
+    # Get all non-done items
+    items = service.get_items()
+    items = [i for i in items if i.status != WorkItemStatus.DONE]
+
+    # Optional type filter
+    if item_type:
+        try:
+            type_filter = WorkItemType.from_string(item_type)
+            items = [i for i in items if i.item_type == type_filter]
+        except ValueError:
+            console.print(f"[red]Unknown type: {item_type}[/red]")
+            sys.exit(1)
+
+    # Items are already sorted by priority from get_items()
+    if as_json:
+        data = [item.to_dict() for item in items]
+        click.echo(json.dumps(data, indent=2))
+    elif export_fmt == "md":
+        lines = ["# Roadmap\n"]
+        for i, item in enumerate(items, 1):
+            priority = item.priority or "medium"
+            assignee = item.assignee or "unassigned"
+            lines.append(
+                f"{i}. **{item.id}**: {item.title} "
+                f"[{priority}] ({item.status.value}) @{assignee}"
+            )
+        click.echo("\n".join(lines))
+    else:
+        render_roadmap(items, console, by_type=by_type)
+
+
+@main.command()
+@click.option("--since", help="Show items completed since date (YYYY-MM-DD)")
+@click.option("--week", is_flag=True, help="Show items completed in the last 7 days")
+@click.option("--month", is_flag=True, help="Show items completed in the last 30 days")
+@click.option("--by-assignee", is_flag=True, help="Group by assignee")
+@click.option("--by-type", is_flag=True, help="Group by item type")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def history(
+    since: str | None,
+    week: bool,
+    month: bool,
+    by_assignee: bool,
+    by_type: bool,
+    as_json: bool,
+):
+    """Show completed work history.
+
+    Displays done items in reverse chronological order.
+    Use time filters to narrow the range.
+
+    Examples:
+        yurtle-kanban history
+        yurtle-kanban history --week
+        yurtle-kanban history --since 2026-01-01
+        yurtle-kanban history --by-assignee
+    """
+    from datetime import datetime, timedelta
+
+    service = get_service()
+
+    # Get done items
+    items = service.get_items(status=WorkItemStatus.DONE)
+
+    # Apply time filters
+    cutoff = None
+    if week:
+        cutoff = datetime.now() - timedelta(days=7)
+    elif month:
+        cutoff = datetime.now() - timedelta(days=30)
+    elif since:
+        try:
+            cutoff = datetime.fromisoformat(since)
+        except ValueError:
+            console.print(f"[red]Invalid date format: {since} (use YYYY-MM-DD)[/red]")
+            sys.exit(1)
+
+    if cutoff:
+        filtered = []
+        for item in items:
+            if item.updated and item.updated >= cutoff:
+                filtered.append(item)
+            elif item.created and datetime.combine(item.created, datetime.min.time()) >= cutoff:
+                filtered.append(item)
+        items = filtered
+
+    # Sort by updated date (most recent first)
+    items.sort(key=lambda i: i.updated or datetime.min, reverse=True)
+
+    if as_json:
+        data = [item.to_dict() for item in items]
+        click.echo(json.dumps(data, indent=2))
+    else:
+        render_history(items, console, by_assignee=by_assignee, by_type=by_type)
 
 
 @main.command("next")

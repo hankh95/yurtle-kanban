@@ -154,7 +154,7 @@ class TestWorkItem:
         assert 'title: "Test feature"' in md
         assert "type: feature" in md
         assert "status: ready" in md
-        assert "```yurtle" in md
+        assert "# Test feature" in md
 
 
 class TestWorkItemStatus:
