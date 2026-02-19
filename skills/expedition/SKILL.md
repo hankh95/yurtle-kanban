@@ -1,6 +1,6 @@
 ---
 name: expedition
-description: Create a new expedition with proper ID allocation and template
+description: Create a new expedition with atomic ID allocation and push
 disable-model-invocation: true
 allowed-tools: Bash(yurtle-kanban *), Bash(git *), Write, Read
 argument-hint: "<title>"
@@ -8,100 +8,59 @@ argument-hint: "<title>"
 
 # Create New Expedition
 
-Create a new expedition with properly allocated ID to prevent conflicts between agents.
+Create a new expedition with atomically allocated ID to prevent conflicts between agents.
 
 ## Steps
 
-### 1. Allocate ID
+### 1. Create Expedition (Atomic)
 
-**CRITICAL**: Always allocate the ID first to prevent duplicates:
-
-```bash
-yurtle-kanban next-id EXP --json
-```
-
-This atomically allocates the next available ID (e.g., EXP-720).
-
-### 2. Create Expedition File
-
-Create `kanban-work/expeditions/EXP-XXX-Title.md` with this template:
-
-```yaml
----
-yurtle: v1.3
-id: EXP-XXX
-type: expedition
-title: "EXP-XXX: $ARGUMENTS"
-status: ready
-priority: MEDIUM
-created: YYYY-MM-DD
-assignee: TBD
-tags: []
-depends_on: []
----
-
-# EXP-XXX: $ARGUMENTS
-
-## Problem Statement
-
-[What problem does this solve?]
-
-## Solution
-
-[High-level approach]
-
-## Build Steps
-
-### Phase 1: [Name]
-
-[Steps to implement]
-
-## Success Criteria
-
-- [ ] [Criterion 1]
-- [ ] [Criterion 2]
-
-## Files to Modify
-
-| File | Action | Description |
-|------|--------|-------------|
-| path/to/file | Create/Modify | What changes |
-
-## Ship's Log
-
-### YYYY-MM-DD: Expedition Created
-
-[Initial context and decision]
-
-## Related
-
-- [Related doc](path)
-```
-
-### 3. IMMEDIATELY Commit and Push
-
-**CRITICAL**: Push the expedition file immediately to prevent conflicts:
+**Use `create --push`** — this is a single atomic command that allocates the ID, creates the file, commits, and pushes:
 
 ```bash
-git add kanban-work/expeditions/EXP-XXX-*.md
-git commit -m "feat(kanban): create EXP-XXX expedition"
-git push
+yurtle-kanban create expedition "$ARGUMENTS" --push --priority medium
 ```
 
-The `next-id` command only reserves the ID. If you don't push the file, other agents won't see it and may create conflicting work.
+This atomically: fetches latest → allocates next ID → creates file → commits → pushes.
+If another agent pushed first, it retries with a new ID. No race window.
 
-### 4. Update Kanban Status
+**Options:**
+- `--priority low|medium|high|critical`
+- `--assignee <name>`
+- `--tags tag1,tag2`
 
-Explicitly set the kanban status so other agents can see it:
+If no remote is configured, the command still works — it commits locally without pushing.
+
+### 2. Flesh Out the Expedition File
+
+Read the created file and fill in the template sections:
 
 ```bash
-yurtle-kanban move EXP-XXX ready
+yurtle-kanban show EXP-XXX
 ```
 
-### 5. Confirm Creation
+Edit the file to add:
+- Problem statement
+- Solution approach
+- Build steps / phases
+- Success criteria
+- Files to modify
+- Ship's log entry
+
+### 3. Confirm Creation
 
 Show the created expedition and suggest next steps:
 - Review and fill in details
-- Set priority and assignee
+- Set priority and assignee if not already set
 - Add dependencies if any
 - Run `/work EXP-XXX` to start working on it
+
+## Advanced: Manual ID Allocation
+
+If you need the ID before creating the file (e.g., to reference it in other files first):
+
+```bash
+yurtle-kanban next-id EXP --json
+# Returns: {"success": true, "id": "EXP-720", "prefix": "EXP", "number": 720}
+```
+
+Then create and push the file manually. But `create --push` is preferred.
