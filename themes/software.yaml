@@ -7,6 +7,7 @@ item_types:
     id_prefix: "FEAT"
     icon: "+"
     plural: "Features"
+    path: "kanban-work/features/"
     color: "#10B981"
     description: "New functionality"
 
@@ -14,6 +15,7 @@ item_types:
     id_prefix: "BUG"
     icon: "!"
     plural: "Bugs"
+    path: "kanban-work/bugs/"
     color: "#EF4444"
     description: "Defects to fix"
 
@@ -21,6 +23,7 @@ item_types:
     id_prefix: "EPIC"
     icon: "E"
     plural: "Epics"
+    path: "kanban-work/epics/"
     color: "#8B5CF6"
     description: "Large initiatives"
 
@@ -28,6 +31,7 @@ item_types:
     id_prefix: "ISSUE"
     icon: "#"
     plural: "Issues"
+    path: "kanban-work/issues/"
     color: "#F59E0B"
     description: "General issues"
 
@@ -35,6 +39,7 @@ item_types:
     id_prefix: "TASK"
     icon: "T"
     plural: "Tasks"
+    path: "kanban-work/tasks/"
     color: "#64748B"
     description: "Small work items"
 
@@ -42,6 +47,7 @@ item_types:
     id_prefix: "IDEA"
     icon: "?"
     plural: "Ideas"
+    path: "kanban-work/ideas/"
     color: "#6366F1"
     description: "Future considerations"
 

@@ -7,6 +7,7 @@ item_types:
     id_prefix: "EXP"
     icon: "X"
     plural: "Expeditions"
+    path: "kanban-work/expeditions/"
     color: "#0EA5E9"
     description: "Research or exploration work"
 
@@ -14,6 +15,7 @@ item_types:
     id_prefix: "VOY"
     icon: "V"
     plural: "Voyages"
+    path: "kanban-work/voyages/"
     color: "#8B5CF6"
     description: "Multi-expedition initiatives"
 
@@ -21,6 +23,7 @@ item_types:
     id_prefix: "CHORE"
     icon: "C"
     plural: "Chores"
+    path: "kanban-work/chores/"
     color: "#6B7280"
     description: "Maintenance and cleanup tasks"
 
@@ -28,6 +31,7 @@ item_types:
     id_prefix: "HAZ"
     icon: "!"
     plural: "Hazards"
+    path: "kanban-work/hazards/"
     color: "#EF4444"
     description: "Bugs and blockers"
 
@@ -35,6 +39,7 @@ item_types:
     id_prefix: "SIG"
     icon: "S"
     plural: "Signals"
+    path: "kanban-work/signals/"
     color: "#10B981"
     description: "Ideas and suggestions"
 

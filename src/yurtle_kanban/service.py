@@ -328,6 +328,43 @@ class KanbanService:
 
         return sorted(items, key=lambda i: (-i.priority_score, i.id))
 
+    def _get_type_directory(self, item_type: WorkItemType) -> Path:
+        """Get the directory for placing a file of this item type.
+
+        Resolution order:
+        1. Theme item_types[type].path (explicit per-type directory)
+        2. PathConfig attributes (features, bugs, epics, tasks)
+        3. scan_paths keyword match (e.g., "expeditions/" for expedition type)
+        4. Fall back to paths.root
+        """
+        # Priority 1: Theme-defined path
+        theme = self.config.get_theme()
+        if theme and "item_types" in theme:
+            type_def = theme["item_types"].get(item_type.value, {})
+            if "path" in type_def:
+                return self.repo_root / type_def["path"]
+
+        # Priority 2: Legacy PathConfig attributes (features, bugs, epics, tasks)
+        type_path = getattr(self.config.paths, item_type.value + "s", None)
+        if type_path:
+            return self.repo_root / type_path
+
+        # Priority 3: Match scan_paths by type keyword
+        plural = item_type.value + "s"  # e.g., "expedition" → "expeditions"
+        for scan_path in self.config.paths.scan_paths:
+            if plural in scan_path.lower():
+                return self.repo_root / scan_path
+
+        # Priority 4: Fall back to root
+        return self.repo_root / (self.config.paths.root or "work/")
+
+    @staticmethod
+    def _slugify(title: str) -> str:
+        """Convert title to filename-safe slug."""
+        slug = re.sub(r"[^a-zA-Z0-9\s-]", "", title)
+        slug = re.sub(r"\s+", "-", slug.strip())
+        return slug[:50]  # Limit length
+
     def create_item(
         self,
         item_type: WorkItemType,
@@ -346,11 +383,10 @@ class KanbanService:
 
         # Determine file path
         if path is None:
-            work_root = self.repo_root / self.config.paths.root
-            type_path = getattr(self.config.paths, item_type.value + "s", None)
-            if type_path:
-                work_root = self.repo_root / type_path
-            path = work_root / f"{item_id}.md"
+            type_dir = self._get_type_directory(item_type)
+            slug = self._slugify(title)
+            filename = f"{item_id}-{slug}.md" if slug else f"{item_id}.md"
+            path = type_dir / filename
 
         # Ensure directory exists
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -406,16 +442,32 @@ class KanbanService:
     def _get_next_id_number(self, prefix: str) -> int:
         """Get next available ID number for a prefix.
 
-        Scans both:
-        1. Item IDs from frontmatter (via self._items)
-        2. Filenames directly (to catch files without proper frontmatter)
+        Scans all three sources of truth:
+        1. _ID_ALLOCATIONS.json (allocated but possibly not yet on disk)
+        2. Item IDs from frontmatter (via self._items)
+        3. Filenames directly (to catch files without proper frontmatter)
+
+        Returns max across all sources + 1.
         """
+        import json
+
         if not self._items:
             self.scan()
 
         max_num = 0
 
-        # Check IDs from parsed items
+        # Source 1: Check _ID_ALLOCATIONS.json for previously allocated IDs
+        lock_file = self.repo_root / ".kanban" / "_ID_ALLOCATIONS.json"
+        if lock_file.exists():
+            try:
+                allocations = json.loads(lock_file.read_text())
+                for alloc in allocations:
+                    if alloc.get("prefix") == prefix:
+                        max_num = max(max_num, alloc.get("number", 0))
+            except (json.JSONDecodeError, Exception):
+                pass
+
+        # Source 2: Check IDs from parsed items
         for item_id in self._items.keys():
             if item_id.startswith(prefix + "-"):
                 try:
@@ -424,7 +476,7 @@ class KanbanService:
                 except (ValueError, IndexError):
                     pass
 
-        # Also scan filenames directly to catch files without frontmatter
+        # Source 3: Scan filenames directly to catch files without frontmatter
         for scan_path in self.config.get_work_paths():
             full_path = self.repo_root / scan_path
             if full_path.exists():
