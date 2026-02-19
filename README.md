@@ -289,29 +289,47 @@ Response: {
 
 ## Claude Code Skills
 
-yurtle-kanban v1.1+ includes Claude Code skills for multi-agent workflows. Skills are markdown files that define reusable agent workflows.
+yurtle-kanban includes **theme-specific** Claude Code skills for multi-agent workflows. Skills are automatically installed by `yurtle-kanban init` based on your theme.
 
-### Available Skills
+### Skills by Theme
+
+**Theme-neutral** (installed for all themes):
 
 | Skill | Command | Purpose |
 |-------|---------|---------|
 | `/sync` | Start of session | Pull latest, check handoffs, reviews, blocked items |
 | `/status` | Show kanban board | See what's in progress, ready, blocked |
-| `/work [ID]` | Pick up work | Start work, create branch, update kanban |
-| `/expedition <title>` | Create expedition | Allocate ID, create file, push immediately |
-| `/done [ID]` | Complete work | Run tests, commit, push, create PR, update kanban |
-| `/review ID` | Review expedition | Verify tests, docs, merge readiness |
-| `/handoff ID agent-X` | Hand off work | Pass work to another agent with context |
-| `/blocked ID reason` | Mark blocked | Track why work is blocked and who can unblock |
 | `/release [patch\|minor\|major]` | Create release | Bump version, update CHANGELOG, create git tag |
+
+**Nautical theme** (`--theme nautical`):
+
+| Skill | Command | Purpose |
+|-------|---------|---------|
+| `/expedition <title>` | Create expedition | Atomic `create --push` with EXP- prefix |
+| `/work [EXP-XXX]` | Pick up work | Start work, create branch, update kanban |
+| `/done [EXP-XXX]` | Complete work | Run tests, commit, push, create PR, update kanban |
+| `/review EXP-XXX` | Review expedition | Verify tests, docs, merge readiness |
+| `/handoff EXP-XXX agent` | Hand off work | Pass work to another agent with context |
+| `/blocked EXP-XXX reason` | Mark blocked | Track why work is blocked and who can unblock |
+
+**Software theme** (`--theme software`):
+
+| Skill | Command | Purpose |
+|-------|---------|---------|
+| `/feature <title>` | Create feature | Atomic `create --push` with FEAT- prefix |
+| `/work [FEAT-XXX]` | Pick up work | Start work, create branch, update kanban |
+| `/done [FEAT-XXX]` | Complete work | Run tests, commit, push, create PR, update kanban |
+| `/review FEAT-XXX` | Review feature | Verify tests, docs, merge readiness |
+| `/handoff FEAT-XXX agent` | Hand off work | Pass work to another agent with context |
+| `/blocked FEAT-XXX reason` | Mark blocked | Track why work is blocked and who can unblock |
 
 ### Multi-Agent Coordination
 
 With multiple agents working concurrently, use these patterns:
 
-**Agent assignment tags** (in expedition frontmatter):
+**Agent assignment tags** (in work item frontmatter):
 ```yaml
-tags: [agent-a, dgx-required]     # Assigned to Agent A, needs GPU
+tags: [agent-a, gpu-required]     # Assigned to Agent A, needs GPU
 tags: [agent-b, mac-compatible]   # Assigned to Agent B, runs on Mac
 tags: [needs-coordination]        # Requires multiple agents
 tags: [any-agent]                 # Anyone can pick up
@@ -328,13 +346,22 @@ tags: [any-agent]                 # Anyone can pick up
 
 ### Installing Skills
 
-Skills are included in the package. To use them with Claude Code:
+Skills are automatically installed to `.claude/skills/` when you run `yurtle-kanban init`:
 
-1. Copy the `skills/` directory to your project's `.claude/skills/`
-2. Or install from the package data:
-   ```bash
-   cp -r $(python -c "import yurtle_kanban; print(yurtle_kanban.__path__[0])")/../share/yurtle-kanban/skills .claude/
-   ```
+```bash
+yurtle-kanban init --theme nautical   # Installs nautical skills (/expedition, etc.)
+yurtle-kanban init --theme software   # Installs software skills (/feature, etc.)
+```
+
+To install manually:
+```bash
+# Theme-neutral skills (always needed)
+cp -r skills/sync skills/status skills/release .claude/skills/
+
+# Theme-specific skills (pick one)
+cp -r skills/nautical/* .claude/skills/   # Nautical theme
+cp -r skills/software/* .claude/skills/   # Software theme
+```
 
 ## Agent Instructions (CLAUDE.md Snippet)
 
@@ -464,6 +491,11 @@ jobs:
 | PR integration | Work item changes visible in pull requests |
 
 ## Changelog
+
+### v1.9.0
+- **Theme-specific skills** — Skills are now organized by theme (`skills/nautical/`, `skills/software/`). Software theme gets `/feature`, `/work`, `/done`, `/review`, `/handoff`, `/blocked` with FEAT-prefixed terminology. Theme-neutral skills (`/sync`, `/status`, `/release`) stay shared.
+- **Auto-install skills on init** — `yurtle-kanban init` now copies theme-matched skills to `.claude/skills/` automatically
+- **`create --push` no-remote fix** — Gracefully degrades to local commit when no git remote is configured (v1.8.1)
 
 ### v1.8.0
 - **`create --push`** — Atomic create: fetch → allocate → create file → commit → push, with retry on conflict. Eliminates ID race conditions in multi-agent workflows.

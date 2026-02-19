@@ -154,3 +154,58 @@ class TestInitScaffolding:
         feat_template = (tmp_path / "kanban-work" / "features" / "_TEMPLATE.md").read_text()
         assert "## Goal" in feat_template
         assert "## Acceptance Criteria" in feat_template
+
+    def test_software_skills_installed(self, tmp_path, monkeypatch):
+        """Software theme should install /feature skill (not /expedition)."""
+        monkeypatch.chdir(tmp_path)
+        import subprocess
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["init", "--theme", "software"])
+
+        assert result.exit_code == 0, result.output
+
+        skills_dir = tmp_path / ".claude" / "skills"
+        # Software theme should get /feature, not /expedition
+        assert (skills_dir / "feature" / "SKILL.md").exists()
+        assert not (skills_dir / "expedition" / "SKILL.md").exists()
+        # Theme-neutral skills should also be installed
+        assert (skills_dir / "sync" / "SKILL.md").exists()
+        assert (skills_dir / "status" / "SKILL.md").exists()
+        assert (skills_dir / "release" / "SKILL.md").exists()
+
+    def test_nautical_skills_installed(self, tmp_path, monkeypatch):
+        """Nautical theme should install /expedition skill (not /feature)."""
+        monkeypatch.chdir(tmp_path)
+        import subprocess
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["init", "--theme", "nautical"])
+
+        assert result.exit_code == 0, result.output
+
+        skills_dir = tmp_path / ".claude" / "skills"
+        # Nautical theme should get /expedition, not /feature
+        assert (skills_dir / "expedition" / "SKILL.md").exists()
+        assert not (skills_dir / "feature" / "SKILL.md").exists()
+        # Theme-neutral skills
+        assert (skills_dir / "sync" / "SKILL.md").exists()
+
+    def test_skill_content_matches_theme(self, tmp_path, monkeypatch):
+        """Software /feature skill should reference FEAT-, not EXP-."""
+        monkeypatch.chdir(tmp_path)
+        import subprocess
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+
+        runner = CliRunner()
+        runner.invoke(main, ["init", "--theme", "software"])
+
+        skill = (tmp_path / ".claude" / "skills" / "feature" / "SKILL.md").read_text()
+        assert "FEAT-" in skill
+        assert "EXP-" not in skill
+
+        work_skill = (tmp_path / ".claude" / "skills" / "work" / "SKILL.md").read_text()
+        assert "FEAT-" in work_skill
+        assert "expedition" not in work_skill.lower()

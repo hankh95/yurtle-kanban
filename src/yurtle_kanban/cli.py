@@ -49,6 +49,22 @@ def _get_templates_dir() -> Path:
     return templates_dir
 
 
+def _get_skills_dir() -> Path:
+    """Get the path to the skills directory in the package."""
+    try:
+        import yurtle_kanban
+        package_dir = Path(yurtle_kanban.__file__).parent.parent.parent
+        skills_dir = package_dir / "skills"
+        if skills_dir.exists():
+            return skills_dir
+    except Exception:
+        pass
+
+    # Fallback: try relative to this file
+    skills_dir = Path(__file__).parent.parent.parent / "skills"
+    return skills_dir
+
+
 console = Console()
 
 
@@ -181,6 +197,33 @@ kanban:
     work_dir = repo_root / path
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    # Install theme-matched Claude Code skills
+    skills_src = _get_skills_dir()
+    skills_installed = 0
+    if skills_src.exists():
+        skills_dst = repo_root / ".claude" / "skills"
+        skills_dst.mkdir(parents=True, exist_ok=True)
+
+        # Copy theme-neutral skills (sync, status, release)
+        for skill_dir in skills_src.iterdir():
+            if skill_dir.is_dir() and skill_dir.name not in ("nautical", "software"):
+                dst = skills_dst / skill_dir.name
+                if dst.exists():
+                    shutil.rmtree(dst)
+                shutil.copytree(skill_dir, dst)
+                skills_installed += 1
+
+        # Copy theme-specific skills
+        theme_skills = skills_src / theme
+        if theme_skills.exists():
+            for skill_dir in theme_skills.iterdir():
+                if skill_dir.is_dir():
+                    dst = skills_dst / skill_dir.name
+                    if dst.exists():
+                        shutil.rmtree(dst)
+                    shutil.copytree(skill_dir, dst)
+                    skills_installed += 1
+
     console.print(f"[green]Initialized yurtle-kanban with theme '{theme}'[/green]")
     console.print(f"  Config:  .kanban/config.yaml")
     if dirs_created:
@@ -190,6 +233,8 @@ kanban:
         console.print(f"  Created: {path}")
     if templates_copied:
         console.print(f"  Copied:  {templates_copied} templates to .kanban/templates/")
+    if skills_installed:
+        console.print(f"  Skills:  {skills_installed} Claude Code skills installed to .claude/skills/")
     console.print()
     console.print("Next steps:")
     example_type = list(item_types.keys())[0] if item_types else "feature"
