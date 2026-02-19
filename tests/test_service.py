@@ -324,6 +324,44 @@ class TestCreateItemAndPush:
         assert "kanban-work/expeditions/" in str(item.file_path)
         assert "Fix-The-Bug" in item.file_path.name
 
+    def test_atomic_create_reports_pushed_true(self, repo_with_remote, nautical_config):
+        """Result should indicate pushed=True when remote exists."""
+        nautical_config.save(repo_with_remote / ".kanban" / "config.yaml")
+        svc = KanbanService(nautical_config, repo_with_remote)
+
+        result = svc.create_item_and_push(WorkItemType.EXPEDITION, "Test Push Flag")
+        assert result["pushed"] is True
+
+    def test_atomic_create_without_remote(self, temp_repo, nautical_config):
+        """Without a remote, should succeed with pushed=False."""
+        svc = KanbanService(nautical_config, temp_repo)
+
+        result = svc.create_item_and_push(
+            WorkItemType.EXPEDITION,
+            "Local Only Item",
+        )
+
+        assert result["success"] is True
+        assert result["pushed"] is False
+        assert result["id"] == "EXP-001"
+        assert result["item"].file_path.exists()
+        assert "no remote" in result["message"].lower()
+
+    def test_atomic_create_without_remote_commits(self, temp_repo, nautical_config):
+        """Without a remote, the commit should still happen."""
+        import subprocess
+
+        svc = KanbanService(nautical_config, temp_repo)
+        svc.create_item_and_push(WorkItemType.SIGNAL, "Local Signal")
+
+        log = subprocess.run(
+            ["git", "log", "--oneline"],
+            cwd=temp_repo,
+            capture_output=True,
+            text=True,
+        )
+        assert "SIG-001" in log.stdout
+
 
 class TestSlugify:
     """Test the title slugification."""

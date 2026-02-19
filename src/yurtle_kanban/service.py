@@ -413,6 +413,19 @@ class KanbanService:
 
         return item
 
+    def _has_remote(self) -> bool:
+        """Check if git remote 'origin' is configured."""
+        try:
+            result = subprocess.run(
+                ["git", "remote"],
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+            )
+            return "origin" in result.stdout.split()
+        except Exception:
+            return False
+
     def create_item_and_push(
         self,
         item_type: WorkItemType,
@@ -423,35 +436,41 @@ class KanbanService:
         tags: list[str] | None = None,
         max_retries: int = 3,
     ) -> dict[str, Any]:
-        """Atomically create a work item and push to remote.
+        """Atomically create a work item, commit, and push to remote.
 
         Single-command flow that prevents ID conflicts:
-        1. Fetch latest from remote
+        1. Pull latest from remote (if remote exists)
         2. Scan for highest ID
         3. Create item file + update _ID_ALLOCATIONS.json
         4. Commit both files
-        5. Push to remote
-        6. On push failure: pull --rebase, re-allocate, retry
+        5. Push to remote (if remote exists)
+        6. On push failure: reset, pull --rebase, retry with new ID
+
+        If no remote is configured, gracefully degrades to local
+        allocate + create + commit (no push, no retry needed).
 
         Returns:
-            dict with 'success', 'item', 'id', and 'message' keys
+            dict with 'success', 'item', 'id', 'pushed', and 'message' keys
         """
         import json as json_mod
 
         prefix = self._get_type_prefix(item_type)
+        has_remote = self._has_remote()
+        attempts = max_retries if has_remote else 1
 
-        for attempt in range(max_retries):
-            # Step 1: Fetch latest
-            try:
-                subprocess.run(
-                    ["git", "pull", "origin", "main"],
-                    cwd=self.repo_root,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-            except Exception as e:
-                logger.warning(f"Git pull failed: {e}")
+        for attempt in range(attempts):
+            # Step 1: Pull latest (only if remote exists)
+            if has_remote:
+                try:
+                    subprocess.run(
+                        ["git", "pull", "origin", "main"],
+                        cwd=self.repo_root,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                except Exception as e:
+                    logger.warning(f"Git pull failed: {e}")
 
             # Step 2: Re-scan
             self._items.clear()
@@ -523,10 +542,21 @@ class KanbanService:
                     "success": False,
                     "item": None,
                     "id": None,
+                    "pushed": False,
                     "message": f"Git commit failed: {e}",
                 }
 
-            # Step 7: Push
+            # Step 7: Push (only if remote exists)
+            if not has_remote:
+                self._items[item_id] = item
+                return {
+                    "success": True,
+                    "item": item,
+                    "id": item_id,
+                    "pushed": False,
+                    "message": f"Created and committed {item_id}: {title} (no remote configured)",
+                }
+
             push_result = subprocess.run(
                 ["git", "push"],
                 cwd=self.repo_root,
@@ -541,6 +571,7 @@ class KanbanService:
                     "success": True,
                     "item": item,
                     "id": item_id,
+                    "pushed": True,
                     "message": f"Created and pushed {item_id}: {title}",
                 }
 
@@ -578,6 +609,7 @@ class KanbanService:
             "success": False,
             "item": None,
             "id": None,
+            "pushed": False,
             "message": f"Failed to create item after {max_retries} retries",
         }
 

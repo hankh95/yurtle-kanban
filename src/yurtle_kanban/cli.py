@@ -295,9 +295,14 @@ def create(
         )
         if result["success"]:
             item = result["item"]
-            console.print(f"[green]Created and pushed {result['id']}: {title}[/green]")
-            console.print(f"  File: {item.file_path}")
-            console.print("[dim]  (committed and pushed to remote)[/dim]")
+            if result.get("pushed"):
+                console.print(f"[green]Created and pushed {result['id']}: {title}[/green]")
+                console.print(f"  File: {item.file_path}")
+                console.print("[dim]  (committed and pushed to remote)[/dim]")
+            else:
+                console.print(f"[green]Created {result['id']}: {title}[/green]")
+                console.print(f"  File: {item.file_path}")
+                console.print("[dim]  (committed locally — no remote configured)[/dim]")
         else:
             console.print(f"[red]Failed: {result['message']}[/red]")
             sys.exit(1)
