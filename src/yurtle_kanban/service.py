@@ -413,6 +413,174 @@ class KanbanService:
 
         return item
 
+    def create_item_and_push(
+        self,
+        item_type: WorkItemType,
+        title: str,
+        priority: str = "medium",
+        assignee: str | None = None,
+        description: str | None = None,
+        tags: list[str] | None = None,
+        max_retries: int = 3,
+    ) -> dict[str, Any]:
+        """Atomically create a work item and push to remote.
+
+        Single-command flow that prevents ID conflicts:
+        1. Fetch latest from remote
+        2. Scan for highest ID
+        3. Create item file + update _ID_ALLOCATIONS.json
+        4. Commit both files
+        5. Push to remote
+        6. On push failure: pull --rebase, re-allocate, retry
+
+        Returns:
+            dict with 'success', 'item', 'id', and 'message' keys
+        """
+        import json as json_mod
+
+        prefix = self._get_type_prefix(item_type)
+
+        for attempt in range(max_retries):
+            # Step 1: Fetch latest
+            try:
+                subprocess.run(
+                    ["git", "pull", "origin", "main"],
+                    cwd=self.repo_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except Exception as e:
+                logger.warning(f"Git pull failed: {e}")
+
+            # Step 2: Re-scan
+            self._items.clear()
+            self.scan()
+
+            # Step 3: Allocate ID
+            next_num = self._get_next_id_number(prefix)
+            item_id = f"{prefix}-{next_num:03d}"
+
+            # Step 4: Create the file
+            type_dir = self._get_type_directory(item_type)
+            slug = self._slugify(title)
+            filename = f"{item_id}-{slug}.md" if slug else f"{item_id}.md"
+            file_path = type_dir / filename
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            item = WorkItem(
+                id=item_id,
+                title=title,
+                item_type=item_type,
+                status=WorkItemStatus.BACKLOG,
+                file_path=file_path,
+                priority=priority,
+                assignee=assignee,
+                created=date.today(),
+                description=description,
+                tags=tags or [],
+            )
+            file_path.write_text(item.to_markdown())
+
+            # Step 5: Update _ID_ALLOCATIONS.json
+            lock_file = self.repo_root / ".kanban" / "_ID_ALLOCATIONS.json"
+            lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+            allocations = []
+            if lock_file.exists():
+                try:
+                    allocations = json_mod.loads(lock_file.read_text())
+                except Exception:
+                    allocations = []
+
+            allocations.append({
+                "id": item_id,
+                "prefix": prefix,
+                "number": next_num,
+                "allocated_at": datetime.now().isoformat(),
+                "allocated_by": self._get_git_user(),
+            })
+            allocations = allocations[-100:]
+            lock_file.write_text(json_mod.dumps(allocations, indent=2))
+
+            # Step 6: Commit both files
+            try:
+                subprocess.run(
+                    ["git", "add", str(file_path), str(lock_file)],
+                    cwd=self.repo_root,
+                    capture_output=True,
+                    check=True,
+                )
+                subprocess.run(
+                    ["git", "commit", "-m", f"Create {item_id}: {title}"],
+                    cwd=self.repo_root,
+                    capture_output=True,
+                    check=True,
+                )
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"Git commit failed: {e}")
+                return {
+                    "success": False,
+                    "item": None,
+                    "id": None,
+                    "message": f"Git commit failed: {e}",
+                }
+
+            # Step 7: Push
+            push_result = subprocess.run(
+                ["git", "push"],
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            if push_result.returncode == 0:
+                self._items[item_id] = item
+                return {
+                    "success": True,
+                    "item": item,
+                    "id": item_id,
+                    "message": f"Created and pushed {item_id}: {title}",
+                }
+
+            # Push failed — another agent got there first
+            logger.warning(
+                f"Push failed (attempt {attempt + 1}), rebasing: {push_result.stderr}"
+            )
+
+            # Clean up: remove the file and reset the commit
+            try:
+                subprocess.run(
+                    ["git", "reset", "HEAD~1"],
+                    cwd=self.repo_root,
+                    capture_output=True,
+                    check=True,
+                )
+                if file_path.exists():
+                    file_path.unlink()
+            except Exception:
+                pass
+
+            # Pull latest and retry
+            try:
+                subprocess.run(
+                    ["git", "pull", "origin", "main", "--rebase"],
+                    cwd=self.repo_root,
+                    capture_output=True,
+                    check=True,
+                    timeout=30,
+                )
+            except Exception as e:
+                logger.warning(f"Rebase failed on retry {attempt + 1}: {e}")
+
+        return {
+            "success": False,
+            "item": None,
+            "id": None,
+            "message": f"Failed to create item after {max_retries} retries",
+        }
+
     def _get_type_prefix(self, item_type: WorkItemType) -> str:
         """Get ID prefix for item type."""
         theme = self.config.get_theme()

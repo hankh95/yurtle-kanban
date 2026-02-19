@@ -199,6 +199,132 @@ class TestCreateItemPlacement:
         assert item2.file_path != item3.file_path
 
 
+class TestCreateItemAndPush:
+    """Test atomic create + push flow."""
+
+    @pytest.fixture
+    def repo_with_remote(self, tmp_path):
+        """Create a git repo with a local 'remote' for push tests."""
+        import subprocess
+
+        # Create a bare repo to act as remote
+        remote_path = tmp_path / "remote.git"
+        remote_path.mkdir()
+        subprocess.run(["git", "init", "--bare"], cwd=remote_path, capture_output=True, check=True)
+
+        # Create working repo
+        work_path = tmp_path / "work"
+        work_path.mkdir()
+        subprocess.run(["git", "init"], cwd=work_path, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=work_path, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=work_path, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(remote_path)],
+            cwd=work_path, capture_output=True, check=True,
+        )
+
+        # Create kanban dirs and initial commit
+        (work_path / ".kanban").mkdir()
+        (work_path / "kanban-work" / "expeditions").mkdir(parents=True)
+        (work_path / "kanban-work" / "signals").mkdir(parents=True)
+        (work_path / ".gitkeep").write_text("")
+        subprocess.run(["git", "add", "."], cwd=work_path, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"],
+            cwd=work_path, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "push", "-u", "origin", "main"],
+            cwd=work_path, capture_output=True, check=True,
+        )
+
+        return work_path
+
+    def test_atomic_create_returns_success(self, repo_with_remote, nautical_config):
+        """Atomic create should return success with item details."""
+        nautical_config.save(repo_with_remote / ".kanban" / "config.yaml")
+        svc = KanbanService(nautical_config, repo_with_remote)
+
+        result = svc.create_item_and_push(
+            item_type=WorkItemType.EXPEDITION,
+            title="Test Atomic",
+        )
+
+        assert result["success"] is True
+        assert result["id"] == "EXP-001"
+        assert result["item"] is not None
+        assert result["item"].file_path.exists()
+
+    def test_atomic_create_writes_allocation(self, repo_with_remote, nautical_config):
+        """Atomic create should update _ID_ALLOCATIONS.json."""
+        nautical_config.save(repo_with_remote / ".kanban" / "config.yaml")
+        svc = KanbanService(nautical_config, repo_with_remote)
+
+        svc.create_item_and_push(
+            item_type=WorkItemType.EXPEDITION,
+            title="Test Alloc",
+        )
+
+        alloc_file = repo_with_remote / ".kanban" / "_ID_ALLOCATIONS.json"
+        assert alloc_file.exists()
+        allocations = json.loads(alloc_file.read_text())
+        assert len(allocations) == 1
+        assert allocations[0]["id"] == "EXP-001"
+
+    def test_atomic_create_pushes_to_remote(self, repo_with_remote, nautical_config):
+        """Atomic create should push to the remote."""
+        import subprocess
+
+        nautical_config.save(repo_with_remote / ".kanban" / "config.yaml")
+        svc = KanbanService(nautical_config, repo_with_remote)
+
+        svc.create_item_and_push(
+            item_type=WorkItemType.SIGNAL,
+            title="Pushed Signal",
+        )
+
+        # Check remote has the commit
+        log = subprocess.run(
+            ["git", "log", "--oneline", "origin/main"],
+            cwd=repo_with_remote,
+            capture_output=True,
+            text=True,
+        )
+        assert "SIG-001" in log.stdout
+
+    def test_atomic_create_sequential_ids(self, repo_with_remote, nautical_config):
+        """Multiple atomic creates should get sequential IDs."""
+        nautical_config.save(repo_with_remote / ".kanban" / "config.yaml")
+        svc = KanbanService(nautical_config, repo_with_remote)
+
+        r1 = svc.create_item_and_push(WorkItemType.EXPEDITION, "First")
+        r2 = svc.create_item_and_push(WorkItemType.EXPEDITION, "Second")
+
+        assert r1["id"] == "EXP-001"
+        assert r2["id"] == "EXP-002"
+
+    def test_atomic_create_places_file_correctly(self, repo_with_remote, nautical_config):
+        """File should go in the theme-defined directory with slug."""
+        nautical_config.save(repo_with_remote / ".kanban" / "config.yaml")
+        svc = KanbanService(nautical_config, repo_with_remote)
+
+        result = svc.create_item_and_push(
+            WorkItemType.EXPEDITION,
+            "Fix The Bug",
+            priority="high",
+        )
+
+        item = result["item"]
+        assert "kanban-work/expeditions/" in str(item.file_path)
+        assert "Fix-The-Bug" in item.file_path.name
+
+
 class TestSlugify:
     """Test the title slugification."""
 

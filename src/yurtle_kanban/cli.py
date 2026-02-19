@@ -6,7 +6,7 @@ File-based kanban using Yurtle (Turtle RDF in Markdown). Git is your database.
 Usage:
     yurtle-kanban init [--theme THEME] [--path PATH]
     yurtle-kanban list [--status STATUS] [--type TYPE] [--assignee ASSIGNEE]
-    yurtle-kanban create TYPE TITLE [--priority PRIORITY] [--assignee ASSIGNEE]
+    yurtle-kanban create TYPE TITLE [--priority PRIORITY] [--assignee ASSIGNEE] [--push]
     yurtle-kanban move ID STATUS
     yurtle-kanban show ID
     yurtle-kanban board
@@ -252,6 +252,7 @@ def list_items(
 @click.option("--assignee", "-a", help="Assignee")
 @click.option("--description", "-d", help="Description")
 @click.option("--tags", help="Comma-separated tags")
+@click.option("--push", is_flag=True, help="Atomic: allocate ID, create file, commit, and push (multi-agent safe)")
 def create(
     item_type: str,
     title: str,
@@ -259,8 +260,19 @@ def create(
     assignee: str | None,
     description: str | None,
     tags: str | None,
+    push: bool,
 ):
-    """Create a new work item."""
+    """Create a new work item.
+
+    Use --push for multi-agent safety: fetches latest, allocates ID,
+    creates the file, commits, and pushes in one atomic operation.
+    If another agent pushed first, it retries with a new ID.
+
+    Examples:
+        yurtle-kanban create feature "Add dark mode"
+        yurtle-kanban create expedition "Research vectors" --push
+        yurtle-kanban create bug "Login crash" --push --assignee Mini
+    """
     service = get_service()
 
     try:
@@ -272,17 +284,34 @@ def create(
 
     tag_list = [t.strip() for t in tags.split(",")] if tags else None
 
-    item = service.create_item(
-        item_type=work_type,
-        title=title,
-        priority=priority,
-        assignee=assignee,
-        description=description,
-        tags=tag_list,
-    )
-
-    console.print(f"[green]Created {item.id}: {item.title}[/green]")
-    console.print(f"  File: {item.file_path}")
+    if push:
+        result = service.create_item_and_push(
+            item_type=work_type,
+            title=title,
+            priority=priority,
+            assignee=assignee,
+            description=description,
+            tags=tag_list,
+        )
+        if result["success"]:
+            item = result["item"]
+            console.print(f"[green]Created and pushed {result['id']}: {title}[/green]")
+            console.print(f"  File: {item.file_path}")
+            console.print("[dim]  (committed and pushed to remote)[/dim]")
+        else:
+            console.print(f"[red]Failed: {result['message']}[/red]")
+            sys.exit(1)
+    else:
+        item = service.create_item(
+            item_type=work_type,
+            title=title,
+            priority=priority,
+            assignee=assignee,
+            description=description,
+            tags=tag_list,
+        )
+        console.print(f"[green]Created {item.id}: {item.title}[/green]")
+        console.print(f"  File: {item.file_path}")
 
 
 @main.command()

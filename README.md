@@ -82,7 +82,7 @@ yurtle-kanban export --format json
 |---------|-------------|
 | `init` | Initialize with theme, scaffold directories + templates |
 | `list` | List work items with optional filters |
-| `create` | Create a new work item |
+| `create` | Create a new work item (`--push` for atomic multi-agent safety) |
 | `move` | Move item to new status (with `--assign`, `--force`) |
 | `show` | Show item details |
 | `board` | Display kanban board in terminal |
@@ -99,27 +99,28 @@ yurtle-kanban export --format json
 
 ### Preventing Duplicate IDs (Multi-Agent Safe)
 
-When multiple agents or developers create work items concurrently, use `next-id` to prevent duplicate IDs:
+**Recommended:** Use `create --push` for a single atomic operation:
 
 ```bash
-# Allocate next ID with git sync (recommended)
-yurtle-kanban next-id EXP
-# Output: Allocated: EXP-609
-
-# Get JSON output
-yurtle-kanban next-id EXP --json
-# {"success": true, "id": "EXP-609", "prefix": "EXP", "number": 609}
-
-# Local only (no git fetch/push)
-yurtle-kanban next-id EXP --no-sync
+# Atomic: fetch → allocate → create file → commit → push (retries on conflict)
+yurtle-kanban create expedition "Research vectors" --push
+yurtle-kanban create feature "Add dark mode" --push --assignee Mini
 ```
 
-The command:
-1. Fetches latest from remote
-2. Scans files (frontmatter + filenames) for highest ID
-3. Commits allocation to `.kanban/_ID_ALLOCATIONS.json`
-4. Pushes to remote to claim the ID
-5. Retries with rebase if push fails (another agent got there first)
+This is the safest approach — one command, no race window between ID allocation and file creation.
+
+**Advanced:** Use `next-id` when you need the ID before creating the file manually:
+
+```bash
+yurtle-kanban next-id EXP --json
+# {"success": true, "id": "EXP-609", "prefix": "EXP", "number": 609}
+```
+
+Both commands:
+1. Fetch latest from remote
+2. Scan files (frontmatter + filenames + `_ID_ALLOCATIONS.json`) for highest ID
+3. Commit and push to claim the ID
+4. Retry with rebase if another agent pushed first
 
 ## Work Items as Files
 
@@ -335,6 +336,43 @@ Skills are included in the package. To use them with Claude Code:
    cp -r $(python -c "import yurtle_kanban; print(yurtle_kanban.__path__[0])")/../share/yurtle-kanban/skills .claude/
    ```
 
+## Agent Instructions (CLAUDE.md Snippet)
+
+Add this to your project's `CLAUDE.md` (or equivalent copilot instructions) so AI agents use yurtle-kanban correctly:
+
+````markdown
+## Work Tracking (yurtle-kanban)
+
+This project uses yurtle-kanban for work tracking. Git is the database.
+
+**Creating work items (IMPORTANT — prevents ID conflicts):**
+```bash
+# ALWAYS use --push when creating items. This is atomic and multi-agent safe.
+yurtle-kanban create <type> "<title>" --push [--priority <p>] [--assignee <name>]
+
+# Examples:
+yurtle-kanban create expedition "Research vectors" --push --priority high
+yurtle-kanban create feature "Add dark mode" --push --assignee Mini
+```
+
+The `--push` flag atomically: fetches latest → allocates ID → creates file → commits → pushes.
+If another agent pushed first, it retries with a new ID. Never create items without `--push`.
+
+**Viewing work:**
+```bash
+yurtle-kanban board                        # Kanban board
+yurtle-kanban roadmap                      # Prioritized backlog
+yurtle-kanban list --status in_progress    # Filter by status
+yurtle-kanban history --week               # Recent completions
+```
+
+**Moving items:**
+```bash
+yurtle-kanban move EXP-001 in_progress
+yurtle-kanban move EXP-001 done
+```
+````
+
 ## Python API
 
 ```python
@@ -426,6 +464,10 @@ jobs:
 | PR integration | Work item changes visible in pull requests |
 
 ## Changelog
+
+### v1.8.0
+- **`create --push`** — Atomic create: fetch → allocate → create file → commit → push, with retry on conflict. Eliminates ID race conditions in multi-agent workflows.
+- **Agent Instructions** — README now includes a copyable CLAUDE.md snippet for AI agent projects
 
 ### v1.7.0
 - **`init` scaffolding** — Creates type-specific directories with `_TEMPLATE.md` files, auto-populates `scan_paths` in config (#7)
