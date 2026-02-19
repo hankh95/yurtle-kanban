@@ -34,9 +34,12 @@ pip install yurtle-kanban[mcp]
 ## Quick Start
 
 ```bash
-# Initialize in your project
+# Initialize in your project (scaffolds directories + templates)
 cd my-project
 yurtle-kanban init --theme software
+# Creates: kanban-work/features/, kanban-work/bugs/, kanban-work/epics/,
+#          kanban-work/issues/, kanban-work/tasks/, kanban-work/ideas/
+# Each with a _TEMPLATE.md showing the correct frontmatter format
 
 # Create work items
 yurtle-kanban create feature "Add dark mode" --priority high
@@ -57,6 +60,16 @@ yurtle-kanban move FEAT-001 done
 # Show item details
 yurtle-kanban show FEAT-001
 
+# Prioritized roadmap (excludes done items)
+yurtle-kanban roadmap
+yurtle-kanban roadmap --by-type
+yurtle-kanban roadmap --export md
+
+# Completed work history
+yurtle-kanban history
+yurtle-kanban history --week
+yurtle-kanban history --by-assignee
+
 # Export board
 yurtle-kanban export --format html --output board.html
 yurtle-kanban export --format markdown --output BOARD.md
@@ -67,13 +80,16 @@ yurtle-kanban export --format json
 
 | Command | Description |
 |---------|-------------|
-| `init` | Initialize yurtle-kanban in current directory |
+| `init` | Initialize with theme, scaffold directories + templates |
 | `list` | List work items with optional filters |
 | `create` | Create a new work item |
-| `move` | Move item to new status |
+| `move` | Move item to new status (with `--assign`, `--force`) |
 | `show` | Show item details |
 | `board` | Display kanban board in terminal |
 | `stats` | Show board statistics |
+| `roadmap` | Prioritized view of all non-done items |
+| `history` | Completed work log with time filters |
+| `metrics` | Flow metrics (cycle time, lead time) |
 | `next` | Suggest next item to work on |
 | `next-id` | **Allocate next ID atomically (prevents duplicates!)** |
 | `blocked` | List blocked items |
@@ -148,27 +164,30 @@ The file IS the work item. `<>` refers to the file itself as an RDF subject.
 
 ## Configuration
 
+Running `yurtle-kanban init --theme software` auto-generates this config:
+
 ```yaml
 # .kanban/config.yaml
 kanban:
   theme: software   # or: nautical, custom
 
   paths:
-    root: work/     # All items in one directory
-    # OR organize by type:
-    # features: specs/features/
-    # bugs: specs/bugs/
-
-  # Scan multiple directories
-  scan_paths:
-    - work/
-    - specs/
-    - docs/roadmap/
+    root: kanban-work/
+    scan_paths:
+      - "kanban-work/features/"
+      - "kanban-work/bugs/"
+      - "kanban-work/epics/"
+      - "kanban-work/issues/"
+      - "kanban-work/tasks/"
+      - "kanban-work/ideas/"
 
   ignore:
     - "**/archive/**"
     - "**/templates/**"
+    - "**/_TEMPLATE*"
 ```
+
+Each directory gets a `_TEMPLATE.md` with the correct frontmatter and type-specific sections (e.g., bugs get "Steps to Reproduce", features get "Acceptance Criteria").
 
 ## Themes
 
@@ -180,8 +199,8 @@ Columns: Backlog → Ready → In Progress → Review → Done
 
 **Nautical:**
 ```
-Expedition (EXP-), Voyage (VOY-), Directive (DIR-), Hazard (HAZ-), Signal (SIG-)
-Columns: Harbor → Provisioning → Underway → Approaching → Arrived
+Expedition (EXP-), Voyage (VOY-), Chore (CHORE-), Hazard (HAZ-), Signal (SIG-)
+Columns: Harbor → Provisioning → Underway → Approaching Port → Arrived (+ Stranded)
 ```
 
 **Custom:** Define your own in `themes/my-theme.yaml`
@@ -405,6 +424,41 @@ jobs:
 | Offline-first | Works without internet |
 | AI agent access | Agents read/write work items like any file |
 | PR integration | Work item changes visible in pull requests |
+
+## Changelog
+
+### v1.7.0
+- **`init` scaffolding** — Creates type-specific directories with `_TEMPLATE.md` files, auto-populates `scan_paths` in config (#7)
+- **`roadmap` command** — Prioritized view of non-done items with `--by-type`, `--type`, `--export md`, `--json` (#1)
+- **`history` command** — Completed work log with `--week`, `--month`, `--since`, `--by-assignee`, `--by-type` (#2)
+
+### v1.6.0
+- **`next-id` fix** — Now reads `_ID_ALLOCATIONS.json` as source of truth (was only scanning filesystem) (#8)
+- **`create` file placement** — Items go into theme-defined type directories (e.g., `kanban-work/expeditions/`) with slugified filenames (#9)
+- **Theme `path:` field** — Both nautical and software themes define explicit paths per item type (#10)
+- 17 new tests for ID allocation, file placement, slug generation, and directory resolution
+
+### v1.5.0
+- Flow metrics with TTL status history tracking (`metrics` command)
+- `--force` flag on `move` to skip WIP limit checks
+- Increased WIP limits in nautical theme
+
+### v1.4.0
+- `--assign` and `--export-board` options on `move` command
+- Expedition-index export format with Work Trail and Dependency Tree
+
+### v1.3.0
+- Expedition-index export format
+
+### v1.2.0
+- `/release` skill for semantic versioning
+- Modern Python 3.10+ type hints
+
+### v1.1.0
+- Claude Code skills for multi-agent workflows (`/sync`, `/work`, `/done`, `/expedition`, etc.)
+
+### v1.0.0
+- Initial release: CLI, board, list, create, move, show, stats, next-id, export, validate, MCP server
 
 ## Related Projects
 
