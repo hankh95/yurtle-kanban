@@ -25,9 +25,16 @@ from pathlib import Path
 import click
 from rich.console import Console
 
-from .board import render_board, render_history, render_item_detail, render_list, render_roadmap, render_stats
+from .board import (
+    render_board,
+    render_history,
+    render_item_detail,
+    render_list,
+    render_roadmap,
+    render_stats,
+)
 from .config import KanbanConfig
-from .export import export_html, export_json, export_markdown, export_expedition_index
+from .export import export_expedition_index, export_html, export_json, export_markdown
 from .models import WorkItemStatus, WorkItemType
 from .service import KanbanService
 
@@ -37,6 +44,7 @@ def _get_templates_dir() -> Path:
     # Templates are at the package root level (not in src/)
     try:
         import yurtle_kanban
+
         package_dir = Path(yurtle_kanban.__file__).parent.parent.parent
         templates_dir = package_dir / "templates"
         if templates_dir.exists():
@@ -53,6 +61,7 @@ def _get_skills_dir() -> Path:
     """Get the path to the skills directory in the package."""
     try:
         import yurtle_kanban
+
         package_dir = Path(yurtle_kanban.__file__).parent.parent.parent
         skills_dir = package_dir / "skills"
         if skills_dir.exists():
@@ -225,7 +234,7 @@ kanban:
                     skills_installed += 1
 
     console.print(f"[green]Initialized yurtle-kanban with theme '{theme}'[/green]")
-    console.print(f"  Config:  .kanban/config.yaml")
+    console.print("  Config:  .kanban/config.yaml")
     if dirs_created:
         for d in dirs_created:
             console.print(f"  Created: {d} (with _TEMPLATE.md)")
@@ -234,12 +243,14 @@ kanban:
     if templates_copied:
         console.print(f"  Copied:  {templates_copied} templates to .kanban/templates/")
     if skills_installed:
-        console.print(f"  Skills:  {skills_installed} Claude Code skills installed to .claude/skills/")
+        console.print(
+            f"  Skills:  {skills_installed} Claude Code skills installed to .claude/skills/"
+        )
     console.print()
     console.print("Next steps:")
     example_type = list(item_types.keys())[0] if item_types else "feature"
     console.print(f"  1. Create work items: yurtle-kanban create {example_type} 'My item'")
-    console.print(f"  2. View board: yurtle-kanban board")
+    console.print("  2. View board: yurtle-kanban board")
 
 
 @main.command("list")
@@ -297,7 +308,11 @@ def list_items(
 @click.option("--assignee", "-a", help="Assignee")
 @click.option("--description", "-d", help="Description")
 @click.option("--tags", help="Comma-separated tags")
-@click.option("--push", is_flag=True, help="Atomic: allocate ID, create file, commit, and push (multi-agent safe)")
+@click.option(
+    "--push",
+    is_flag=True,
+    help="Atomic: allocate ID, create file, commit, and push (multi-agent safe)",
+)
 def create(
     item_type: str,
     title: str,
@@ -370,9 +385,21 @@ def create(
 @click.option("--no-commit", is_flag=True, help="Don't create git commit")
 @click.option("--message", "-m", help="Custom commit message")
 @click.option("--assign", "-a", help="Set assignee (e.g., 'Claude-M5', 'Claude-DGX')")
-@click.option("--export-board", "-e", help="Export board to file after move (e.g., 'kanban-work/KANBAN-BOARD.md')")
+@click.option(
+    "--export-board",
+    "-e",
+    help="Export board to file after move (e.g., 'kanban-work/KANBAN-BOARD.md')",
+)
 @click.option("--force", "-f", is_flag=True, help="Skip WIP limit and workflow validation")
-def move(item_id: str, new_status: str, no_commit: bool, message: str | None, assign: str | None, export_board: str | None, force: bool):
+def move(
+    item_id: str,
+    new_status: str,
+    no_commit: bool,
+    message: str | None,
+    assign: str | None,
+    export_board: str | None,
+    force: bool,
+):
     """Move a work item to a new status.
 
     Examples:
@@ -487,8 +514,7 @@ def roadmap(by_type: bool, item_type: str | None, export_fmt: str | None, as_jso
             priority = item.priority or "medium"
             assignee = item.assignee or "unassigned"
             lines.append(
-                f"{i}. **{item.id}**: {item.title} "
-                f"[{priority}] ({item.status.value}) @{assignee}"
+                f"{i}. **{item.id}**: {item.title} [{priority}] ({item.status.value}) @{assignee}"
             )
         click.echo("\n".join(lines))
     else:
@@ -641,14 +667,14 @@ def metrics(item_id: str | None, as_json: bool):
                 if hours < 24:
                     console.print(f"  Cycle Time: {hours:.1f} hours")
                 else:
-                    console.print(f"  Cycle Time: {hours/24:.1f} days")
+                    console.print(f"  Cycle Time: {hours / 24:.1f} days")
 
             if metrics_data.get("lead_time_hours"):
                 hours = metrics_data["lead_time_hours"]
                 if hours < 24:
                     console.print(f"  Lead Time: {hours:.1f} hours")
                 else:
-                    console.print(f"  Lead Time: {hours/24:.1f} days")
+                    console.print(f"  Lead Time: {hours / 24:.1f} days")
 
             console.print(f"  Transitions: {metrics_data['transitions']}")
             console.print()
@@ -659,7 +685,7 @@ def metrics(item_id: str | None, as_json: bool):
                     if hours < 24:
                         console.print(f"    {status}: {hours:.1f} hours")
                     else:
-                        console.print(f"    {status}: {hours/24:.1f} days")
+                        console.print(f"    {status}: {hours / 24:.1f} days")
     else:
         # Board-wide metrics
         metrics_data = service.get_board_metrics()
@@ -677,24 +703,31 @@ def metrics(item_id: str | None, as_json: bool):
                 if hours < 24:
                     console.print(f"  Avg Cycle Time: {hours:.1f} hours")
                 else:
-                    console.print(f"  Avg Cycle Time: {hours/24:.1f} days")
+                    console.print(f"  Avg Cycle Time: {hours / 24:.1f} days")
 
             if metrics_data.get("avg_lead_time_hours"):
                 hours = metrics_data["avg_lead_time_hours"]
                 if hours < 24:
                     console.print(f"  Avg Lead Time: {hours:.1f} hours")
                 else:
-                    console.print(f"  Avg Lead Time: {hours/24:.1f} days")
+                    console.print(f"  Avg Lead Time: {hours / 24:.1f} days")
 
             if not metrics_data.get("items_with_history"):
                 console.print()
-                console.print("[dim]No status history yet. History is recorded when items move.[/dim]")
+                console.print(
+                    "[dim]No status history yet. History is recorded when items move.[/dim]"
+                )
 
 
 @main.command("export")
-@click.option("--format", "-f", "fmt", required=True,
-              type=click.Choice(["html", "markdown", "json", "expedition-index"]),
-              help="Export format")
+@click.option(
+    "--format",
+    "-f",
+    "fmt",
+    required=True,
+    type=click.Choice(["html", "markdown", "json", "expedition-index"]),
+    help="Export format",
+)
 @click.option("--output", "-o", help="Output file (default: stdout)")
 @click.option("--min-id", default=600, help="Minimum ID for Work Trail (expedition-index only)")
 def export_cmd(fmt: str, output: str | None, min_id: int):
@@ -788,13 +821,18 @@ def validate(fix: bool):
     for item in items:
         # Check for duplicate IDs
         if item.id in seen_ids:
-            issues.append({
-                "type": "duplicate_id",
-                "id": item.id,
-                "file": str(item.file_path),
-                "other_file": str(seen_ids[item.id]),
-                "message": f"Duplicate ID: {item.id} in {item.file_path} and {seen_ids[item.id]}",
-            })
+            issues.append(
+                {
+                    "type": "duplicate_id",
+                    "id": item.id,
+                    "file": str(item.file_path),
+                    "other_file": str(seen_ids[item.id]),
+                    "message": (
+                        f"Duplicate ID: {item.id} in "
+                        f"{item.file_path} and {seen_ids[item.id]}"
+                    ),
+                }
+            )
         else:
             seen_ids[item.id] = item.file_path
 
@@ -803,13 +841,15 @@ def validate(fix: bool):
         expected_prefix = item.id  # e.g., "EXP-300"
 
         if not file_stem.startswith(expected_prefix):
-            issues.append({
-                "type": "filename_mismatch",
-                "id": item.id,
-                "file": str(item.file_path),
-                "expected_prefix": expected_prefix,
-                "message": f"File name '{file_stem}' doesn't start with ID '{expected_prefix}'",
-            })
+            issues.append(
+                {
+                    "type": "filename_mismatch",
+                    "id": item.id,
+                    "file": str(item.file_path),
+                    "expected_prefix": expected_prefix,
+                    "message": f"File name '{file_stem}' doesn't start with ID '{expected_prefix}'",
+                }
+            )
 
     if not issues:
         console.print("[green]All work items valid.[/green]")
@@ -844,6 +884,7 @@ def validate(fix: bool):
                 # Try to preserve the descriptive part after the ID
                 # e.g., "EXP-303-Automated-Domain-Research" -> keep "-Automated-Domain-Research"
                 import re
+
                 match = re.match(r"^[A-Z]+-\d+(-.*)?$", old_stem)
                 if match and match.group(1):
                     new_stem = issue["expected_prefix"] + match.group(1)

@@ -11,7 +11,6 @@ from rich.table import Table
 
 from .models import Board, WorkItem, WorkItemStatus
 
-
 # Priority colors
 PRIORITY_COLORS = {
     "critical": "bold red",
@@ -182,10 +181,12 @@ def render_item_detail(item: WorkItem, console: Console | None = None) -> None:
     icon = TYPE_ICONS.get(item.item_type.value, "•")
 
     console.print()
-    console.print(Panel(
-        f"[bold]{icon} {item.id}: {item.title}[/bold]",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel(
+            f"[bold]{icon} {item.id}: {item.title}[/bold]",
+            border_style="cyan",
+        )
+    )
 
     # Details table
     table = Table(show_header=False, box=box.SIMPLE)

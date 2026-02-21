@@ -2,13 +2,11 @@
 Configuration management for yurtle-kanban.
 """
 
-import importlib.resources
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
-
 
 # Cache for loaded themes
 _theme_cache: dict[str, dict[str, Any]] = {}
@@ -28,8 +26,11 @@ def _load_builtin_theme(theme_name: str, repo_root: Path | None = None) -> dict[
     # Priority 2: Package share directory (pip installed)
     try:
         import sys
+
         for path in sys.path:
-            share_path = Path(path).parent / "share" / "yurtle-kanban" / "themes" / f"{theme_name}.yaml"
+            share_path = (
+                Path(path).parent / "share" / "yurtle-kanban" / "themes" / f"{theme_name}.yaml"
+            )
             if share_path.exists():
                 search_paths.append(share_path)
     except Exception:
@@ -38,6 +39,7 @@ def _load_builtin_theme(theme_name: str, repo_root: Path | None = None) -> dict[
     # Priority 3: Source directory (development)
     try:
         import yurtle_kanban
+
         package_dir = Path(yurtle_kanban.__file__).parent.parent.parent
         search_paths.append(package_dir / "themes" / f"{theme_name}.yaml")
     except Exception:
@@ -61,6 +63,7 @@ def _load_builtin_theme(theme_name: str, repo_root: Path | None = None) -> dict[
 @dataclass
 class PathConfig:
     """Configuration for work item paths."""
+
     root: str | None = "work/"
     scan_paths: list[str] = field(default_factory=list)
     ignore: list[str] = field(default_factory=lambda: ["**/archive/**", "**/templates/**"])
@@ -141,8 +144,7 @@ class KanbanConfig:
             paths.append(Path(self.paths.root))
 
         # Add type-specific paths
-        for type_path in [self.paths.features, self.paths.bugs,
-                          self.paths.epics, self.paths.tasks]:
+        for type_path in [self.paths.features, self.paths.bugs, self.paths.epics, self.paths.tasks]:
             if type_path:
                 paths.append(Path(type_path))
 
