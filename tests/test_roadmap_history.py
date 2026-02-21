@@ -17,7 +17,7 @@ from yurtle_kanban.service import KanbanService
 @pytest.fixture
 def populated_repo(tmp_path):
     """Create a repo with several work items in different states."""
-    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
         cwd=tmp_path, capture_output=True, check=True,
@@ -204,7 +204,7 @@ class TestHistoryCommand:
 
     def test_history_empty_when_no_done(self, tmp_path, monkeypatch):
         """Should handle empty done list gracefully."""
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
         (tmp_path / ".kanban").mkdir()
         (tmp_path / "kanban-work").mkdir()
 

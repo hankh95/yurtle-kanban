@@ -17,7 +17,7 @@ def temp_repo(tmp_path):
     """Create a minimal git repo with kanban config."""
     # Init git repo
     import subprocess
-    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
         cwd=tmp_path, capture_output=True, check=True,
@@ -210,12 +210,18 @@ class TestCreateItemAndPush:
         # Create a bare repo to act as remote
         remote_path = tmp_path / "remote.git"
         remote_path.mkdir()
-        subprocess.run(["git", "init", "--bare"], cwd=remote_path, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "init", "--bare", "-b", "main"],
+            cwd=remote_path, capture_output=True, check=True,
+        )
 
         # Create working repo
         work_path = tmp_path / "work"
         work_path.mkdir()
-        subprocess.run(["git", "init"], cwd=work_path, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "init", "-b", "main"],
+            cwd=work_path, capture_output=True, check=True,
+        )
         subprocess.run(
             ["git", "config", "user.email", "test@test.com"],
             cwd=work_path, capture_output=True, check=True,
