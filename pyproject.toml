@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yurtle-kanban"
-version = "1.9.0"
+version = "1.10.0"
 description = "File-based kanban using Yurtle (Turtle RDF in Markdown). Git is your database."
 readme = "README.md"
 license = "MIT"
