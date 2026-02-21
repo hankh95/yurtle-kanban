@@ -139,6 +139,12 @@ class KanbanService:
             # Extract description (content after frontmatter, before yurtle block)
             description = self._extract_description(content)
 
+            # Parse resolution fields
+            resolution = frontmatter.get("resolution")
+            superseded_by = frontmatter.get("superseded_by", [])
+            if isinstance(superseded_by, str):
+                superseded_by = [s.strip() for s in superseded_by.split(",")]
+
             return WorkItem(
                 id=item_id,
                 title=title,
@@ -151,6 +157,8 @@ class KanbanService:
                 tags=tags,
                 depends_on=depends_on,
                 description=description,
+                resolution=resolution,
+                superseded_by=superseded_by,
             )
 
         except Exception as e:
@@ -905,13 +913,16 @@ class KanbanService:
             item.assignee = assignee
 
         # Update file with status history
-        self._update_item_file_with_history(item, old_status, new_status, assignee)
+        forced = skip_wip_check or not validate_workflow
+        self._update_item_file_with_history(item, old_status, new_status, assignee, forced=forced)
 
         # Git commit if requested
         if commit:
             commit_msg = message
             if not commit_msg:
                 commit_msg = f"Move {item_id} to {new_status.value}"
+                if forced:
+                    commit_msg += " (forced)"
                 if assignee:
                     commit_msg += f" (assigned to {assignee})"
             self._git_commit(item.file_path, commit_msg)
@@ -1009,6 +1020,7 @@ class KanbanService:
         old_status: WorkItemStatus,
         new_status: WorkItemStatus,
         assignee: str | None = None,
+        forced: bool = False,
     ) -> None:
         """Update file and append status change to yurtle knowledge block.
 
@@ -1023,6 +1035,8 @@ class KanbanService:
             kb:by "Claude-M5" ;
         ] .
         ```
+
+        When forced=True, an additional kb:forcedMove triple is recorded.
         """
         content = item.file_path.read_text()
 
@@ -1037,6 +1051,8 @@ class KanbanService:
         ttl_entry = f'''    kb:status kb:{new_status.value} ;
     kb:at "{timestamp}"^^xsd:dateTime ;
     kb:by "{agent}" ;'''
+        if forced:
+            ttl_entry += '\n    kb:forcedMove "true"^^xsd:boolean ;'
 
         # Check if yurtle block with status changes exists
         import re

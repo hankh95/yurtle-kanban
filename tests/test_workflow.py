@@ -226,6 +226,119 @@ class TestWorkflowParser:
         assert valid is True
 
 
+class TestRuleEvaluation:
+    """Tests for _evaluate_rule_condition (fail-closed enforcement)."""
+
+    @pytest.fixture
+    def parser(self):
+        return WorkflowParser()
+
+    @pytest.fixture
+    def base_item(self):
+        return WorkItem(
+            id="EXP-001",
+            title="Test Expedition",
+            item_type=WorkItemType.FEATURE,
+            status=WorkItemStatus.READY,
+            file_path=Path("test.md"),
+        )
+
+    def test_assignee_check_passes(self, parser, base_item):
+        base_item.assignee = "Claude-M5"
+        result = parser._evaluate_rule_condition("item.assignee is not None", base_item)
+        assert result is True
+
+    def test_assignee_check_fails_when_none(self, parser, base_item):
+        base_item.assignee = None
+        result = parser._evaluate_rule_condition("item.assignee is not None", base_item)
+        assert result is False
+
+    def test_assignee_check_fails_when_empty(self, parser, base_item):
+        base_item.assignee = ""
+        result = parser._evaluate_rule_condition("item.assignee is not None", base_item)
+        assert result is False
+
+    def test_description_length_passes(self, parser, base_item):
+        base_item.description = "A" * 51
+        result = parser._evaluate_rule_condition("len(item.description or '') > 50", base_item)
+        assert result is True
+
+    def test_description_length_fails(self, parser, base_item):
+        base_item.description = "Short"
+        result = parser._evaluate_rule_condition("len(item.description or '') > 50", base_item)
+        assert result is False
+
+    def test_resolution_check_passes(self, parser, base_item):
+        base_item.resolution = "completed"
+        result = parser._evaluate_rule_condition("item.resolution is not None", base_item)
+        assert result is True
+
+    def test_resolution_check_fails_when_none(self, parser, base_item):
+        base_item.resolution = None
+        result = parser._evaluate_rule_condition("item.resolution is not None", base_item)
+        assert result is False
+
+    def test_resolution_check_fails_when_empty(self, parser, base_item):
+        base_item.resolution = ""
+        result = parser._evaluate_rule_condition("item.resolution is not None", base_item)
+        assert result is False
+
+    def test_superseded_by_passes_when_not_superseded(self, parser, base_item):
+        """Non-superseded resolutions don't need superseded_by."""
+        base_item.resolution = "wont_do"
+        result = parser._evaluate_rule_condition(
+            "item.resolution != 'superseded' or len(item.superseded_by) > 0", base_item
+        )
+        assert result is True
+
+    def test_superseded_by_passes_when_superseded_with_refs(self, parser, base_item):
+        """Superseded items with references pass."""
+        base_item.resolution = "superseded"
+        base_item.superseded_by = ["EXP-002"]
+        result = parser._evaluate_rule_condition(
+            "item.resolution != 'superseded' or len(item.superseded_by) > 0", base_item
+        )
+        assert result is True
+
+    def test_superseded_by_fails_when_superseded_without_refs(self, parser, base_item):
+        """Superseded items without references fail."""
+        base_item.resolution = "superseded"
+        base_item.superseded_by = []
+        result = parser._evaluate_rule_condition(
+            "item.resolution != 'superseded' or len(item.superseded_by) > 0", base_item
+        )
+        assert result is False
+
+    def test_objective_check_passes_with_title(self, parser, base_item):
+        base_item.title = "Expedition Objective: Deploy"
+        base_item.description = None
+        result = parser._evaluate_rule_condition(
+            "'objective' in item.title.lower() or item.description", base_item
+        )
+        assert result is True
+
+    def test_objective_check_passes_with_description(self, parser, base_item):
+        base_item.title = "No keyword here"
+        base_item.description = "Has content"
+        result = parser._evaluate_rule_condition(
+            "'objective' in item.title.lower() or item.description", base_item
+        )
+        assert result is True
+
+    def test_objective_check_fails_with_neither(self, parser, base_item):
+        base_item.title = "No keyword here"
+        base_item.description = None
+        result = parser._evaluate_rule_condition(
+            "'objective' in item.title.lower() or item.description", base_item
+        )
+        assert result is False
+
+    def test_unknown_condition_fails_closed(self, parser, base_item):
+        """Unknown conditions must return False (fail-closed)."""
+        result = parser._evaluate_rule_condition("some_unknown_check(item)", base_item)
+        assert result is False
+
+
 class TestTransitionRule:
     """Tests for transition rules."""
 

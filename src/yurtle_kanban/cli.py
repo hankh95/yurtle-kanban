@@ -398,6 +398,7 @@ def move(item_id: str, new_status: str, no_commit: bool, message: str | None, as
             message=message,
             assignee=assign,
             skip_wip_check=force,
+            validate_workflow=not force,
         )
         console.print(f"[green]Moved {item.id} to {status.value}[/green]")
         if assign:

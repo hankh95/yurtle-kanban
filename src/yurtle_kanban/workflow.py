@@ -410,23 +410,48 @@ class WorkflowParser:
         return True, ""
 
     def _evaluate_rule_condition(self, condition: str, item: WorkItem) -> bool:
-        """Safely evaluate a rule condition."""
-        # Very limited evaluation for safety
-        # Only supports simple attribute checks
+        """Safely evaluate a rule condition.
+
+        Uses pattern matching against known condition strings from workflow files.
+        Unknown conditions fail closed (return False) to prevent silently passing
+        rules that the engine doesn't understand.
+        """
+        # Assignee check
         if "item.assignee is not None" in condition:
             return item.assignee is not None and item.assignee != ""
 
+        # Description length check
         if "len(item.description" in condition:
             desc = item.description or ""
-            # Extract minimum length from condition
             match = re.search(r'>\s*(\d+)', condition)
             if match:
                 min_len = int(match.group(1))
                 return len(desc) > min_len
             return len(desc) > 0
 
-        # Default: condition passes
-        return True
+        # Resolution check (e.g., "item.resolution is not None")
+        if "item.resolution is not None" in condition:
+            return item.resolution is not None and item.resolution != ""
+
+        # Compound superseded_by check
+        # e.g., "item.resolution != 'superseded' or len(item.superseded_by) > 0"
+        if "item.resolution" in condition and "superseded_by" in condition:
+            if item.resolution != "superseded":
+                return True
+            return len(item.superseded_by) > 0
+
+        # Objective check (e.g., "'objective' in item.title.lower() or item.description")
+        if "'objective'" in condition and "item.title" in condition:
+            title_has = "objective" in (item.title or "").lower()
+            desc_has = bool(item.description)
+            return title_has or desc_has
+
+        # Fail closed: unknown conditions block the transition
+        logger.warning(
+            f"Unknown rule condition (fail-closed): {condition!r}. "
+            f"Add a handler in _evaluate_rule_condition() to support it."
+        )
+        return False
 
     def get_default_workflow(self) -> WorkflowConfig:
         """Get default workflow configuration."""

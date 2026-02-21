@@ -110,6 +110,8 @@ class WorkItem:
     description: str | None = None
     comments: list[Comment] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    resolution: str | None = None  # completed, superseded, wont_do, duplicate, obsolete, merged
+    superseded_by: list[str] = field(default_factory=list)  # list of item IDs
 
     def __post_init__(self):
         if self.updated is None:
@@ -153,6 +155,8 @@ class WorkItem:
             "depends_on": self.depends_on,
             "blocks": self.blocks,
             "description": self.description,
+            "resolution": self.resolution,
+            "superseded_by": self.superseded_by,
         }
 
     def to_yurtle(self) -> str:
@@ -182,6 +186,13 @@ class WorkItem:
         if self.depends_on:
             deps_str = ', '.join(f'<{dep}>' for dep in self.depends_on)
             lines.append(f'   kb:dependsOn {deps_str} ;')
+
+        if self.resolution:
+            lines.append(f'   kb:resolution "{self.resolution}" ;')
+
+        if self.superseded_by:
+            refs_str = ', '.join(f'<{ref}>' for ref in self.superseded_by)
+            lines.append(f'   kb:supersededBy {refs_str} ;')
 
         # Remove trailing semicolon from last line and add period
         lines[-1] = lines[-1].rstrip(' ;') + ' .'
@@ -216,6 +227,11 @@ class WorkItem:
             lines.append(f'depends_on: [{", ".join(self.depends_on)}]')
         else:
             lines.append('depends_on: []')
+
+        if self.resolution:
+            lines.append(f'resolution: {self.resolution}')
+        if self.superseded_by:
+            lines.append(f'superseded_by: [{", ".join(self.superseded_by)}]')
 
         lines.extend([
             "---",

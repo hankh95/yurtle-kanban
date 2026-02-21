@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from yurtle_kanban.config import KanbanConfig, PathConfig
-from yurtle_kanban.models import WorkItemType
+from yurtle_kanban.models import WorkItemStatus, WorkItemType
 from yurtle_kanban.service import KanbanService
 
 
@@ -415,3 +415,66 @@ class TestGetTypeDirectory:
         path = svc._get_type_directory(WorkItemType.FEATURE)
 
         assert path == temp_repo / "work/"
+
+
+class TestForceAuditTrail:
+    """Test that forced moves leave an audit trail in the status history."""
+
+    def test_forced_move_records_audit_triple(self, temp_repo, nautical_config):
+        """Forced moves should include kb:forcedMove in status history."""
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(WorkItemType.EXPEDITION, "Test Force Audit")
+
+        # Move to in_progress with force (skipping validation)
+        svc.move_item(
+            item.id,
+            WorkItemStatus.IN_PROGRESS,
+            commit=False,
+            skip_wip_check=True,
+            validate_workflow=False,
+        )
+
+        content = item.file_path.read_text()
+        assert 'kb:forcedMove "true"' in content
+
+    def test_normal_move_no_forced_triple(self, temp_repo, nautical_config):
+        """Normal moves should NOT include kb:forcedMove."""
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(
+            WorkItemType.EXPEDITION, "Test Normal Move",
+            assignee="Agent-A",
+            description="Has a description for rules."
+        )
+
+        # backlog → ready is a valid default transition
+        svc.move_item(
+            item.id,
+            WorkItemStatus.READY,
+            commit=False,
+        )
+
+        content = item.file_path.read_text()
+        assert "forcedMove" not in content
+
+    def test_resolution_fields_parsed_from_file(self, temp_repo, nautical_config):
+        """Service should parse resolution and superseded_by from frontmatter."""
+        exp_dir = temp_repo / "kanban-work" / "expeditions"
+        (exp_dir / "EXP-001-Closed-Item.md").write_text(
+            "---\n"
+            "id: EXP-001\n"
+            "title: Closed Item\n"
+            "type: expedition\n"
+            "status: done\n"
+            "resolution: superseded\n"
+            "superseded_by: [EXP-002, EXP-003]\n"
+            "depends_on: []\n"
+            "---\n\n# Closed Item\n"
+        )
+
+        svc = KanbanService(nautical_config, temp_repo)
+        svc.scan()
+        item = svc.get_item("EXP-001")
+
+        assert item is not None
+        assert item.resolution == "superseded"
+        assert item.superseded_by == ["EXP-002", "EXP-003"]
