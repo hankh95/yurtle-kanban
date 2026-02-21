@@ -62,9 +62,6 @@ class WorkItemIndexer:
             g = Graph()
             g.parse(file_path, format="yurtle")
 
-            # Query for work item properties
-            file_path.as_uri()
-
             # Get type
             item_type = None
             for type_name in WorkItemType:

@@ -223,6 +223,21 @@ class TestWorkItem:
         yurtle = item.to_yurtle()
         assert 'kb:resolution "completed"' in yurtle
 
+    def test_superseded_by_in_to_yurtle(self):
+        """to_yurtle includes kb:supersededBy triple when set."""
+        item = WorkItem(
+            id="FEAT-001",
+            title="Replaced",
+            item_type=WorkItemType.FEATURE,
+            status=WorkItemStatus.DONE,
+            file_path=Path("test.md"),
+            resolution="superseded",
+            superseded_by=["FEAT-002"],
+        )
+        yurtle = item.to_yurtle()
+        assert "kb:supersededBy" in yurtle
+        assert "<FEAT-002>" in yurtle
+
     def test_no_resolution_fields_when_unset(self):
         """to_markdown/to_yurtle omit resolution fields when not set."""
         item = WorkItem(

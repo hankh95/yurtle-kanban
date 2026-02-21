@@ -355,12 +355,6 @@ def export_expedition_index(board: Board, min_id: int = 600) -> str:
         done_items = [i for i in recent_items if i.status == WorkItemStatus.DONE]
         active_items = [i for i in recent_items if i.status == WorkItemStatus.IN_PROGRESS]
         ready_items = [i for i in recent_items if i.status == WorkItemStatus.READY]
-        [
-            i
-            for i in recent_items
-            if i.status
-            not in (WorkItemStatus.DONE, WorkItemStatus.IN_PROGRESS, WorkItemStatus.READY)
-        ]
 
         # Show active items first
         for item in active_items:

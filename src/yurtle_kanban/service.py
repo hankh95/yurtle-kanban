@@ -140,6 +140,13 @@ class KanbanService:
 
             # Parse resolution fields
             resolution = frontmatter.get("resolution")
+            if resolution is not None:
+                valid_resolutions = {"completed", "superseded", "wont_do", "duplicate", "obsolete", "merged"}
+                if resolution not in valid_resolutions:
+                    logger.warning(
+                        f"Unknown resolution '{resolution}' in {file_path}. "
+                        f"Valid values: {', '.join(sorted(valid_resolutions))}"
+                    )
             superseded_by = frontmatter.get("superseded_by", [])
             if isinstance(superseded_by, str):
                 superseded_by = [s.strip() for s in superseded_by.split(",")]
@@ -914,7 +921,7 @@ class KanbanService:
             item.assignee = assignee
 
         # Update file with status history
-        forced = skip_wip_check or not validate_workflow
+        forced = not validate_workflow
         self._update_item_file_with_history(item, old_status, new_status, assignee, forced=forced)
 
         # Git commit if requested
@@ -1216,6 +1223,7 @@ class KanbanService:
         for block in yurtle_blocks:
             # Find all blank nodes with statusChange data
             # Pattern matches: kb:status kb:XXX ; kb:at "..." ; kb:by "..." ;
+            # Optional: kb:forcedMove "true"^^xsd:boolean ;
             entry_pattern = (
                 r'kb:status kb:(\w+)\s*;\s*'
                 r'kb:at "([^"]+)"(?:\^\^xsd:dateTime)?'
@@ -1223,13 +1231,22 @@ class KanbanService:
             )
             for entry_match in re.finditer(entry_pattern, block):
                 try:
-                    history.append(
-                        {
-                            "status": entry_match.group(1),
-                            "at": datetime.fromisoformat(entry_match.group(2)),
-                            "by": entry_match.group(3),
-                        }
-                    )
+                    entry: dict[str, Any] = {
+                        "status": entry_match.group(1),
+                        "at": datetime.fromisoformat(entry_match.group(2)),
+                        "by": entry_match.group(3),
+                        "forced": False,
+                    }
+                    # Check for forcedMove triple in the surrounding blank node
+                    # Look ahead from the match end for kb:forcedMove within the same node
+                    rest = block[entry_match.end():]
+                    # The forced triple appears before the next ']' (end of blank node)
+                    node_end = rest.find("]")
+                    if node_end != -1:
+                        node_rest = rest[:node_end]
+                        if 'kb:forcedMove "true"' in node_rest:
+                            entry["forced"] = True
+                    history.append(entry)
                 except ValueError:
                     pass
 
