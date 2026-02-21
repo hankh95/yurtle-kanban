@@ -19,8 +19,7 @@ import yaml
 
 from .config import KanbanConfig
 from .models import Board, Column, Comment, WorkItem, WorkItemStatus, WorkItemType
-from .workflow import WorkflowParser, WorkflowConfig
-
+from .workflow import WorkflowConfig, WorkflowParser
 
 logger = logging.getLogger("yurtle-kanban")
 
@@ -139,6 +138,19 @@ class KanbanService:
             # Extract description (content after frontmatter, before yurtle block)
             description = self._extract_description(content)
 
+            # Parse resolution fields
+            resolution = frontmatter.get("resolution")
+            if resolution is not None:
+                valid_resolutions = {"completed", "superseded", "wont_do", "duplicate", "obsolete", "merged"}
+                if resolution not in valid_resolutions:
+                    logger.warning(
+                        f"Unknown resolution '{resolution}' in {file_path}. "
+                        f"Valid values: {', '.join(sorted(valid_resolutions))}"
+                    )
+            superseded_by = frontmatter.get("superseded_by", [])
+            if isinstance(superseded_by, str):
+                superseded_by = [s.strip() for s in superseded_by.split(",")]
+
             return WorkItem(
                 id=item_id,
                 title=title,
@@ -151,6 +163,8 @@ class KanbanService:
                 tags=tags,
                 depends_on=depends_on,
                 description=description,
+                resolution=resolution,
+                superseded_by=superseded_by,
             )
 
         except Exception as e:
@@ -282,13 +296,15 @@ class KanbanService:
 
         if theme and "columns" in theme:
             for col_id, col_def in theme["columns"].items():
-                columns.append(Column(
-                    id=col_id,
-                    name=col_def.get("name", col_id.title()),
-                    order=col_def.get("order", 0),
-                    wip_limit=col_def.get("wip_limit"),
-                    description=col_def.get("description"),
-                ))
+                columns.append(
+                    Column(
+                        id=col_id,
+                        name=col_def.get("name", col_id.title()),
+                        order=col_def.get("order", 0),
+                        wip_limit=col_def.get("wip_limit"),
+                        description=col_def.get("description"),
+                    )
+                )
         else:
             # Default software columns
             columns = [
@@ -512,13 +528,15 @@ class KanbanService:
                 except Exception:
                     allocations = []
 
-            allocations.append({
-                "id": item_id,
-                "prefix": prefix,
-                "number": next_num,
-                "allocated_at": datetime.now().isoformat(),
-                "allocated_by": self._get_git_user(),
-            })
+            allocations.append(
+                {
+                    "id": item_id,
+                    "prefix": prefix,
+                    "number": next_num,
+                    "allocated_at": datetime.now().isoformat(),
+                    "allocated_by": self._get_git_user(),
+                }
+            )
             allocations = allocations[-100:]
             lock_file.write_text(json_mod.dumps(allocations, indent=2))
 
@@ -576,9 +594,7 @@ class KanbanService:
                 }
 
             # Push failed — another agent got there first
-            logger.warning(
-                f"Push failed (attempt {attempt + 1}), rebasing: {push_result.stderr}"
-            )
+            logger.warning(f"Push failed (attempt {attempt + 1}), rebasing: {push_result.stderr}")
 
             # Clean up: remove the file and reset the commit
             try:
@@ -905,22 +921,23 @@ class KanbanService:
             item.assignee = assignee
 
         # Update file with status history
-        self._update_item_file_with_history(item, old_status, new_status, assignee)
+        forced = not validate_workflow
+        self._update_item_file_with_history(item, old_status, new_status, assignee, forced=forced)
 
         # Git commit if requested
         if commit:
             commit_msg = message
             if not commit_msg:
                 commit_msg = f"Move {item_id} to {new_status.value}"
+                if forced:
+                    commit_msg += " (forced)"
                 if assignee:
                     commit_msg += f" (assigned to {assignee})"
             self._git_commit(item.file_path, commit_msg)
 
         return item
 
-    def _validate_transition(
-        self, item: WorkItem, new_status: WorkItemStatus
-    ) -> tuple[bool, str]:
+    def _validate_transition(self, item: WorkItem, new_status: WorkItemStatus) -> tuple[bool, str]:
         """Validate a status transition using workflow rules if available.
 
         Returns:
@@ -940,9 +957,7 @@ class KanbanService:
             else:
                 return False, f"Invalid transition from {item.status.value} to {new_status.value}"
 
-    def _is_valid_transition(
-        self, from_status: WorkItemStatus, to_status: WorkItemStatus
-    ) -> bool:
+    def _is_valid_transition(self, from_status: WorkItemStatus, to_status: WorkItemStatus) -> bool:
         """Check if a status transition is valid (default rules)."""
         # Define valid transitions
         valid_transitions = {
@@ -991,10 +1006,27 @@ class KanbanService:
         """Get default allowed transitions for a status."""
         transitions = {
             WorkItemStatus.BACKLOG: [WorkItemStatus.READY, WorkItemStatus.BLOCKED],
-            WorkItemStatus.READY: [WorkItemStatus.IN_PROGRESS, WorkItemStatus.BACKLOG, WorkItemStatus.BLOCKED],
-            WorkItemStatus.IN_PROGRESS: [WorkItemStatus.REVIEW, WorkItemStatus.DONE, WorkItemStatus.BLOCKED, WorkItemStatus.READY],
-            WorkItemStatus.REVIEW: [WorkItemStatus.DONE, WorkItemStatus.IN_PROGRESS, WorkItemStatus.BLOCKED],
-            WorkItemStatus.BLOCKED: [WorkItemStatus.READY, WorkItemStatus.IN_PROGRESS, WorkItemStatus.BACKLOG],
+            WorkItemStatus.READY: [
+                WorkItemStatus.IN_PROGRESS,
+                WorkItemStatus.BACKLOG,
+                WorkItemStatus.BLOCKED,
+            ],
+            WorkItemStatus.IN_PROGRESS: [
+                WorkItemStatus.REVIEW,
+                WorkItemStatus.DONE,
+                WorkItemStatus.BLOCKED,
+                WorkItemStatus.READY,
+            ],
+            WorkItemStatus.REVIEW: [
+                WorkItemStatus.DONE,
+                WorkItemStatus.IN_PROGRESS,
+                WorkItemStatus.BLOCKED,
+            ],
+            WorkItemStatus.BLOCKED: [
+                WorkItemStatus.READY,
+                WorkItemStatus.IN_PROGRESS,
+                WorkItemStatus.BACKLOG,
+            ],
             WorkItemStatus.DONE: [],
         }
         return transitions.get(status, [])
@@ -1009,6 +1041,7 @@ class KanbanService:
         old_status: WorkItemStatus,
         new_status: WorkItemStatus,
         assignee: str | None = None,
+        forced: bool = False,
     ) -> None:
         """Update file and append status change to yurtle knowledge block.
 
@@ -1023,6 +1056,8 @@ class KanbanService:
             kb:by "Claude-M5" ;
         ] .
         ```
+
+        When forced=True, an additional kb:forcedMove triple is recorded.
         """
         content = item.file_path.read_text()
 
@@ -1032,23 +1067,31 @@ class KanbanService:
             content = self._update_frontmatter_field(content, "assignee", assignee)
 
         # Create TTL status change entry
-        timestamp = datetime.now().isoformat(timespec='seconds')
+        timestamp = datetime.now().isoformat(timespec="seconds")
         agent = assignee or self._get_git_user()
         ttl_entry = f'''    kb:status kb:{new_status.value} ;
     kb:at "{timestamp}"^^xsd:dateTime ;
     kb:by "{agent}" ;'''
+        if forced:
+            ttl_entry += '\n    kb:forcedMove "true"^^xsd:boolean ;'
 
         # Check if yurtle block with status changes exists
         import re
+
         # Match block with prefix declarations and statusChange predicates
-        yurtle_pattern = r"```yurtle\n@prefix kb: <https://yurtle\.dev/kanban/> \.\n@prefix xsd: <http://www\.w3\.org/2001/XMLSchema#> \.\n\n<> kb:statusChange(.*?)\.\n```"
+        yurtle_pattern = (
+            r"```yurtle\n@prefix kb: <https://yurtle\.dev/"
+            r"kanban/> \.\n@prefix xsd: <http://www\.w3\.org/"
+            r"2001/XMLSchema#> \.\n\n<> kb:statusChange"
+            r"(.*?)\.\n```"
+        )
         match = re.search(yurtle_pattern, content, re.DOTALL)
 
         if match:
             # Append to existing block - add new blank node
             existing = match.group(1).rstrip()
             # Remove trailing period and add comma for new entry
-            new_block = f'''```yurtle
+            new_block = f"""```yurtle
 @prefix kb: <https://yurtle.dev/kanban/> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
@@ -1056,18 +1099,18 @@ class KanbanService:
   [
 {ttl_entry}
   ] .
-```'''
-            content = content[:match.start()] + new_block + content[match.end():]
+```"""
+            content = content[: match.start()] + new_block + content[match.end() :]
         else:
             # Add new yurtle block at end
-            new_block = f'''```yurtle
+            new_block = f"""```yurtle
 @prefix kb: <https://yurtle.dev/kanban/> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 <> kb:statusChange [
 {ttl_entry}
   ] .
-```'''
+```"""
             content = content.rstrip() + "\n\n" + new_block + "\n"
 
         item.file_path.write_text(content)
@@ -1075,6 +1118,7 @@ class KanbanService:
     def _update_frontmatter_field(self, content: str, field: str, value: str) -> str:
         """Update a single field in the frontmatter."""
         import re
+
         pattern = rf"^{field}:.*$"
         replacement = f"{field}: {value}"
         # Only replace in frontmatter (between first two ---)
@@ -1179,14 +1223,30 @@ class KanbanService:
         for block in yurtle_blocks:
             # Find all blank nodes with statusChange data
             # Pattern matches: kb:status kb:XXX ; kb:at "..." ; kb:by "..." ;
-            entry_pattern = r'kb:status kb:(\w+)\s*;\s*kb:at "([^"]+)"(?:\^\^xsd:dateTime)?\s*;\s*kb:by "([^"]+)"'
+            # Optional: kb:forcedMove "true"^^xsd:boolean ;
+            entry_pattern = (
+                r'kb:status kb:(\w+)\s*;\s*'
+                r'kb:at "([^"]+)"(?:\^\^xsd:dateTime)?'
+                r'\s*;\s*kb:by "([^"]+)"'
+            )
             for entry_match in re.finditer(entry_pattern, block):
                 try:
-                    history.append({
+                    entry: dict[str, Any] = {
                         "status": entry_match.group(1),
                         "at": datetime.fromisoformat(entry_match.group(2)),
                         "by": entry_match.group(3),
-                    })
+                        "forced": False,
+                    }
+                    # Check for forcedMove triple in the surrounding blank node
+                    # Look ahead from the match end for kb:forcedMove within the same node
+                    rest = block[entry_match.end():]
+                    # The forced triple appears before the next ']' (end of blank node)
+                    node_end = rest.find("]")
+                    if node_end != -1:
+                        node_rest = rest[:node_end]
+                        if 'kb:forcedMove "true"' in node_rest:
+                            entry["forced"] = True
+                    history.append(entry)
                 except ValueError:
                     pass
 
@@ -1274,7 +1334,9 @@ class KanbanService:
         return {
             "total_items": len(board.items),
             "items_with_history": cycle_time_count,
-            "avg_cycle_time_hours": total_cycle_time / cycle_time_count if cycle_time_count else None,
+            "avg_cycle_time_hours": total_cycle_time / cycle_time_count
+            if cycle_time_count
+            else None,
             "avg_lead_time_hours": total_lead_time / lead_time_count if lead_time_count else None,
             "total_time_in_status": total_time_in_status,
         }

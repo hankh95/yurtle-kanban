@@ -156,6 +156,104 @@ class TestWorkItem:
         assert "status: ready" in md
         assert "# Test feature" in md
 
+    def test_resolution_fields_default(self):
+        """resolution and superseded_by default to None/empty."""
+        item = WorkItem(
+            id="FEAT-001",
+            title="Test",
+            item_type=WorkItemType.FEATURE,
+            status=WorkItemStatus.READY,
+            file_path=Path("test.md"),
+        )
+        assert item.resolution is None
+        assert item.superseded_by == []
+
+    def test_resolution_in_to_dict(self):
+        """to_dict includes resolution and superseded_by."""
+        item = WorkItem(
+            id="FEAT-001",
+            title="Test",
+            item_type=WorkItemType.FEATURE,
+            status=WorkItemStatus.DONE,
+            file_path=Path("test.md"),
+            resolution="superseded",
+            superseded_by=["FEAT-002"],
+        )
+        data = item.to_dict()
+        assert data["resolution"] == "superseded"
+        assert data["superseded_by"] == ["FEAT-002"]
+
+    def test_resolution_in_to_markdown(self):
+        """to_markdown includes resolution when set."""
+        item = WorkItem(
+            id="FEAT-001",
+            title="Closed item",
+            item_type=WorkItemType.FEATURE,
+            status=WorkItemStatus.DONE,
+            file_path=Path("test.md"),
+            resolution="wont_do",
+        )
+        md = item.to_markdown()
+        assert "resolution: wont_do" in md
+
+    def test_superseded_by_in_to_markdown(self):
+        """to_markdown includes superseded_by when set."""
+        item = WorkItem(
+            id="FEAT-001",
+            title="Replaced item",
+            item_type=WorkItemType.FEATURE,
+            status=WorkItemStatus.DONE,
+            file_path=Path("test.md"),
+            resolution="superseded",
+            superseded_by=["FEAT-002", "FEAT-003"],
+        )
+        md = item.to_markdown()
+        assert "superseded_by: [FEAT-002, FEAT-003]" in md
+
+    def test_resolution_in_to_yurtle(self):
+        """to_yurtle includes resolution triple when set."""
+        item = WorkItem(
+            id="FEAT-001",
+            title="Test",
+            item_type=WorkItemType.FEATURE,
+            status=WorkItemStatus.DONE,
+            file_path=Path("test.md"),
+            resolution="completed",
+        )
+        yurtle = item.to_yurtle()
+        assert 'kb:resolution "completed"' in yurtle
+
+    def test_superseded_by_in_to_yurtle(self):
+        """to_yurtle includes kb:supersededBy triple when set."""
+        item = WorkItem(
+            id="FEAT-001",
+            title="Replaced",
+            item_type=WorkItemType.FEATURE,
+            status=WorkItemStatus.DONE,
+            file_path=Path("test.md"),
+            resolution="superseded",
+            superseded_by=["FEAT-002"],
+        )
+        yurtle = item.to_yurtle()
+        assert "kb:supersededBy" in yurtle
+        assert "<FEAT-002>" in yurtle
+
+    def test_no_resolution_fields_when_unset(self):
+        """to_markdown/to_yurtle omit resolution fields when not set."""
+        item = WorkItem(
+            id="FEAT-001",
+            title="Test",
+            item_type=WorkItemType.FEATURE,
+            status=WorkItemStatus.READY,
+            file_path=Path("test.md"),
+        )
+        md = item.to_markdown()
+        yurtle = item.to_yurtle()
+        assert "resolution" not in md
+        assert "superseded_by" not in md
+        assert "resolution" not in yurtle
+        assert "supersededBy" not in yurtle
+
 
 class TestWorkItemStatus:
     """Tests for work item statuses."""

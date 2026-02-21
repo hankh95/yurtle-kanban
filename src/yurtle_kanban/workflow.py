@@ -28,7 +28,7 @@ except ImportError:
     yaml = None
 
 try:
-    from rdflib import Graph, Namespace, Literal, RDF
+    from rdflib import RDF, Graph, Literal, Namespace
 except ImportError:
     Graph = None
     Namespace = None
@@ -36,7 +36,6 @@ except ImportError:
     RDF = None
 
 from .models import WorkItem, WorkItemStatus
-
 
 logger = logging.getLogger("yurtle-kanban.workflow")
 
@@ -53,6 +52,7 @@ else:
 @dataclass
 class StateConfig:
     """Configuration for a workflow state."""
+
     id: str
     name: str
     is_initial: bool = False
@@ -68,15 +68,17 @@ class StateConfig:
 @dataclass
 class TransitionRule:
     """Validation rule for state transitions."""
+
     id: str
     applies_to: str  # State ID this rule applies to
-    condition: str   # Python expression to evaluate
-    message: str     # Error message if condition fails
+    condition: str  # Python expression to evaluate
+    message: str  # Error message if condition fails
 
 
 @dataclass
 class WorkflowConfig:
     """Configuration for a kanban workflow."""
+
     id: str
     name: str = ""
     applies_to: str = "feature"  # Item type this workflow governs
@@ -213,7 +215,7 @@ class WorkflowParser:
             states=states,
             rules=rules,
             version=frontmatter.get("version", 1),
-            source_file=str(file_path)
+            source_file=str(file_path),
         )
 
     def _extract_frontmatter(self, content: str) -> dict[str, Any]:
@@ -242,7 +244,7 @@ class WorkflowParser:
 
     def _extract_yurtle_blocks(self, content: str) -> list[str]:
         """Extract ```yurtle ... ``` blocks from markdown."""
-        pattern = r'```yurtle\n(.*?)```'
+        pattern = r"```yurtle\n(.*?)```"
         matches = re.findall(pattern, content, re.DOTALL)
         return matches
 
@@ -253,7 +255,9 @@ class WorkflowParser:
                 return line[2:].strip()
         return None
 
-    def _parse_workflow_from_yurtle(self, yurtle_blocks: list[str]) -> tuple[list[StateConfig], list[TransitionRule]]:
+    def _parse_workflow_from_yurtle(
+        self, yurtle_blocks: list[str]
+    ) -> tuple[list[StateConfig], list[TransitionRule]]:
         """Parse workflow states and rules from yurtle blocks."""
         states = []
         rules = []
@@ -292,31 +296,34 @@ class WorkflowParser:
                     description_lit = g.value(subj, WORKFLOW.description, default="")
                     description = str(description_lit)
 
-                    states.append(StateConfig(
-                        id=state_id,
-                        name=name,
-                        is_initial=is_initial,
-                        is_terminal=is_terminal,
-                        allowed_transitions=transitions,
-                        description=description
-                    ))
+                    states.append(
+                        StateConfig(
+                            id=state_id,
+                            name=name,
+                            is_initial=is_initial,
+                            is_terminal=is_terminal,
+                            allowed_transitions=transitions,
+                            description=description,
+                        )
+                    )
 
                 # Find all Rule nodes
                 for subj in g.subjects(RDF.type, WORKFLOW.Rule):
                     rule_id = self._extract_local_id(str(subj))
 
                     applies_to_uri = g.value(subj, WORKFLOW.appliesTo)
-                    applies_to = self._extract_local_id(str(applies_to_uri)) if applies_to_uri else ""
+                    applies_to = (
+                        self._extract_local_id(str(applies_to_uri)) if applies_to_uri else ""
+                    )
 
                     condition = str(g.value(subj, WORKFLOW.condition, default=""))
                     message = str(g.value(subj, WORKFLOW.message, default=""))
 
-                    rules.append(TransitionRule(
-                        id=rule_id,
-                        applies_to=applies_to,
-                        condition=condition,
-                        message=message
-                    ))
+                    rules.append(
+                        TransitionRule(
+                            id=rule_id, applies_to=applies_to, condition=condition, message=message
+                        )
+                    )
 
             except Exception as e:
                 logger.warning(f"Failed to parse yurtle block for workflow: {e}")
@@ -335,25 +342,24 @@ class WorkflowParser:
     def _get_default_states(self) -> list[StateConfig]:
         """Get default workflow states."""
         return [
-            StateConfig(id="backlog", name="Backlog", is_initial=True,
-                       allowed_transitions=["ready"]),
-            StateConfig(id="ready", name="Ready",
-                       allowed_transitions=["in_progress", "blocked", "backlog"]),
-            StateConfig(id="in_progress", name="In Progress",
-                       allowed_transitions=["review", "blocked", "ready"]),
-            StateConfig(id="blocked", name="Blocked",
-                       allowed_transitions=["ready", "in_progress"]),
-            StateConfig(id="review", name="Review",
-                       allowed_transitions=["done", "in_progress"]),
-            StateConfig(id="done", name="Done", is_terminal=True,
-                       allowed_transitions=[]),
+            StateConfig(
+                id="backlog", name="Backlog", is_initial=True, allowed_transitions=["ready"]
+            ),
+            StateConfig(
+                id="ready", name="Ready", allowed_transitions=["in_progress", "blocked", "backlog"]
+            ),
+            StateConfig(
+                id="in_progress",
+                name="In Progress",
+                allowed_transitions=["review", "blocked", "ready"],
+            ),
+            StateConfig(id="blocked", name="Blocked", allowed_transitions=["ready", "in_progress"]),
+            StateConfig(id="review", name="Review", allowed_transitions=["done", "in_progress"]),
+            StateConfig(id="done", name="Done", is_terminal=True, allowed_transitions=[]),
         ]
 
     def validate_transition(
-        self,
-        item: WorkItem,
-        new_status: WorkItemStatus,
-        workflow: WorkflowConfig | None = None
+        self, item: WorkItem, new_status: WorkItemStatus, workflow: WorkflowConfig | None = None
     ) -> tuple[bool, str]:
         """
         Validate a status transition against workflow rules.
@@ -368,7 +374,9 @@ class WorkflowParser:
         """
         # Load workflow if not provided
         if workflow is None:
-            item_type = item.item_type.value if hasattr(item.item_type, 'value') else str(item.item_type)
+            item_type = (
+                item.item_type.value if hasattr(item.item_type, "value") else str(item.item_type)
+            )
             workflow = self.load_workflow(item_type)
 
         if workflow is None:
@@ -376,8 +384,8 @@ class WorkflowParser:
             return True, ""
 
         # Get current and target states
-        current_status = item.status.value if hasattr(item.status, 'value') else str(item.status)
-        target_status = new_status.value if hasattr(new_status, 'value') else str(new_status)
+        current_status = item.status.value if hasattr(item.status, "value") else str(item.status)
+        target_status = new_status.value if hasattr(new_status, "value") else str(new_status)
 
         current_state = workflow.get_state(current_status)
         target_state = workflow.get_state(target_status)
@@ -410,23 +418,48 @@ class WorkflowParser:
         return True, ""
 
     def _evaluate_rule_condition(self, condition: str, item: WorkItem) -> bool:
-        """Safely evaluate a rule condition."""
-        # Very limited evaluation for safety
-        # Only supports simple attribute checks
+        """Safely evaluate a rule condition.
+
+        Uses pattern matching against known condition strings from workflow files.
+        Unknown conditions fail closed (return False) to prevent silently passing
+        rules that the engine doesn't understand.
+        """
+        # Assignee check
         if "item.assignee is not None" in condition:
             return item.assignee is not None and item.assignee != ""
 
+        # Description length check
         if "len(item.description" in condition:
             desc = item.description or ""
-            # Extract minimum length from condition
-            match = re.search(r'>\s*(\d+)', condition)
+            match = re.search(r">\s*(\d+)", condition)
             if match:
                 min_len = int(match.group(1))
                 return len(desc) > min_len
             return len(desc) > 0
 
-        # Default: condition passes
-        return True
+        # Resolution check (e.g., "item.resolution is not None")
+        if "item.resolution is not None" in condition:
+            return item.resolution is not None and item.resolution != ""
+
+        # Compound superseded_by check
+        # e.g., "item.resolution != 'superseded' or len(item.superseded_by) > 0"
+        if "item.resolution" in condition and "superseded_by" in condition:
+            if item.resolution != "superseded":
+                return True
+            return len(item.superseded_by) > 0
+
+        # Objective check (e.g., "'objective' in item.title.lower() or item.description")
+        if "'objective'" in condition and "item.title" in condition:
+            title_has = "objective" in (item.title or "").lower()
+            desc_has = bool(item.description)
+            return title_has or desc_has
+
+        # Fail closed: unknown conditions block the transition
+        logger.warning(
+            f"Unknown rule condition (fail-closed): {condition!r}. "
+            f"Add a handler in _evaluate_rule_condition() to support it."
+        )
+        return False
 
     def get_default_workflow(self) -> WorkflowConfig:
         """Get default workflow configuration."""
@@ -434,7 +467,7 @@ class WorkflowParser:
             id="default",
             name="Default Workflow",
             applies_to="feature",
-            states=self._get_default_states()
+            states=self._get_default_states(),
         )
 
 

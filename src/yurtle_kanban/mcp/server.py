@@ -21,7 +21,6 @@ from ..config import KanbanConfig
 from ..models import WorkItemStatus, WorkItemType
 from ..service import KanbanService
 
-
 logger = logging.getLogger("yurtle-kanban-mcp")
 
 
@@ -52,14 +51,27 @@ class KanbanMCPServer:
         return [
             {
                 "name": "kanban_list_items",
-                "description": "List work items from the kanban board. Can filter by status, type, or assignee.",
+                "description": (
+                    "List work items from the kanban board."
+                    " Can filter by status, type, or assignee."
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "status": {
                             "type": "string",
-                            "description": "Filter by status: backlog, ready, in_progress, review, done, blocked",
-                            "enum": ["backlog", "ready", "in_progress", "review", "done", "blocked"],
+                            "description": (
+                                "Filter by status: backlog, ready,"
+                                " in_progress, review, done, blocked"
+                            ),
+                            "enum": [
+                                "backlog",
+                                "ready",
+                                "in_progress",
+                                "review",
+                                "done",
+                                "blocked",
+                            ],
                         },
                         "item_type": {
                             "type": "string",
@@ -138,7 +150,14 @@ class KanbanMCPServer:
                         "new_status": {
                             "type": "string",
                             "description": "The new status",
-                            "enum": ["backlog", "ready", "in_progress", "review", "done", "blocked"],
+                            "enum": [
+                                "backlog",
+                                "ready",
+                                "in_progress",
+                                "review",
+                                "done",
+                                "blocked",
+                            ],
                         },
                     },
                     "required": ["item_id", "new_status"],
@@ -146,7 +165,10 @@ class KanbanMCPServer:
             },
             {
                 "name": "kanban_get_board",
-                "description": "Get the current kanban board state with all items organized by column.",
+                "description": (
+                    "Get the current kanban board state"
+                    " with all items organized by column."
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
@@ -212,7 +234,11 @@ class KanbanMCPServer:
             },
             {
                 "name": "kanban_update_item",
-                "description": "Update a work item's properties (title, priority, assignee, description, tags). Use move_item for status changes.",
+                "description": (
+                    "Update a work item's properties"
+                    " (title, priority, assignee, description,"
+                    " tags). Use move_item for status changes."
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -248,17 +274,33 @@ class KanbanMCPServer:
             },
             {
                 "name": "kanban_next_id",
-                "description": "Allocate the next available ID for a prefix. IMPORTANT: Call this before creating a new work item to prevent duplicate IDs when multiple agents work concurrently. This fetches from remote, finds the highest existing ID, and commits an allocation lock.",
+                "description": (
+                    "Allocate the next available ID for a"
+                    " prefix. IMPORTANT: Call this before"
+                    " creating a new work item to prevent"
+                    " duplicate IDs when multiple agents work"
+                    " concurrently. This fetches from remote,"
+                    " finds the highest existing ID, and"
+                    " commits an allocation lock."
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "prefix": {
                             "type": "string",
-                            "description": "The ID prefix (e.g., 'EXP' for expeditions, 'FEAT' for features, 'BUG' for bugs, 'VOY' for voyages)",
+                            "description": (
+                                "The ID prefix (e.g., 'EXP' for"
+                                " expeditions, 'FEAT' for features,"
+                                " 'BUG' for bugs, 'VOY' for voyages)"
+                            ),
                         },
                         "sync_remote": {
                             "type": "boolean",
-                            "description": "Whether to fetch/push to remote git (default: true). Set false for local-only allocation.",
+                            "description": (
+                                "Whether to fetch/push to remote git"
+                                " (default: true). Set false for"
+                                " local-only allocation."
+                            ),
                             "default": True,
                         },
                     },
@@ -373,13 +415,15 @@ class KanbanMCPServer:
             except ValueError:
                 items = []
 
-            columns.append({
-                "id": col.id,
-                "name": col.name,
-                "wip_limit": col.wip_limit,
-                "items": [item.to_dict() for item in items],
-                "count": len(items),
-            })
+            columns.append(
+                {
+                    "id": col.id,
+                    "name": col.name,
+                    "wip_limit": col.wip_limit,
+                    "items": [item.to_dict() for item in items],
+                    "count": len(items),
+                }
+            )
 
         return {
             "board": {

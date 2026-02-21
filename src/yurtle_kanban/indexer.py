@@ -2,14 +2,13 @@
 Work item indexer - discovers and parses Yurtle work items.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from rdflib import Graph, Namespace
 
 from yurtle_kanban.config import KanbanConfig
 from yurtle_kanban.models import WorkItem, WorkItemStatus, WorkItemType
-
 
 KB = Namespace("https://yurtle.dev/kanban/")
 
@@ -63,9 +62,6 @@ class WorkItemIndexer:
             g = Graph()
             g.parse(file_path, format="yurtle")
 
-            # Query for work item properties
-            file_uri = file_path.as_uri()
-
             # Get type
             item_type = None
             for type_name in WorkItemType:
@@ -105,7 +101,7 @@ class WorkItemIndexer:
                     title = line[2:].strip()
                     break
                 if line.startswith("title:"):
-                    title = line.split(":", 1)[1].strip().strip('"\'')
+                    title = line.split(":", 1)[1].strip().strip("\"'")
                     break
 
             return WorkItem(

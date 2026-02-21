@@ -15,7 +15,7 @@ class TestInitScaffolding:
         monkeypatch.chdir(tmp_path)
         # Init a git repo so the CLI doesn't complain
         import subprocess
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
 
         runner = CliRunner()
         result = runner.invoke(main, ["init", "--theme", "software"])
@@ -37,7 +37,7 @@ class TestInitScaffolding:
         """Nautical theme should create 5 type directories."""
         monkeypatch.chdir(tmp_path)
         import subprocess
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
 
         runner = CliRunner()
         result = runner.invoke(main, ["init", "--theme", "nautical"])
@@ -58,7 +58,7 @@ class TestInitScaffolding:
         """Each directory should get a _TEMPLATE.md file."""
         monkeypatch.chdir(tmp_path)
         import subprocess
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
 
         runner = CliRunner()
         runner.invoke(main, ["init", "--theme", "software"])
@@ -71,7 +71,7 @@ class TestInitScaffolding:
         """Template frontmatter should use the correct ID prefix."""
         monkeypatch.chdir(tmp_path)
         import subprocess
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
 
         runner = CliRunner()
         runner.invoke(main, ["init", "--theme", "software"])
@@ -86,7 +86,7 @@ class TestInitScaffolding:
         """Nautical template should use EXP, VOY, etc."""
         monkeypatch.chdir(tmp_path)
         import subprocess
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
 
         runner = CliRunner()
         runner.invoke(main, ["init", "--theme", "nautical"])
@@ -101,7 +101,7 @@ class TestInitScaffolding:
         """Generated config should include scan_paths for all type dirs."""
         monkeypatch.chdir(tmp_path)
         import subprocess
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
 
         runner = CliRunner()
         runner.invoke(main, ["init", "--theme", "software"])
@@ -114,7 +114,7 @@ class TestInitScaffolding:
         """Config should ignore _TEMPLATE* files."""
         monkeypatch.chdir(tmp_path)
         import subprocess
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
 
         runner = CliRunner()
         runner.invoke(main, ["init", "--theme", "software"])
@@ -126,7 +126,7 @@ class TestInitScaffolding:
         """All directories should be flat (no nesting like idea-intake/ideas-queue)."""
         monkeypatch.chdir(tmp_path)
         import subprocess
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
 
         runner = CliRunner()
         runner.invoke(main, ["init", "--theme", "software"])
@@ -142,7 +142,7 @@ class TestInitScaffolding:
         """Bug templates should have 'Steps to Reproduce', expeditions 'Plan', etc."""
         monkeypatch.chdir(tmp_path)
         import subprocess
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
 
         runner = CliRunner()
         runner.invoke(main, ["init", "--theme", "software"])
@@ -159,7 +159,7 @@ class TestInitScaffolding:
         """Software theme should install /feature skill (not /expedition)."""
         monkeypatch.chdir(tmp_path)
         import subprocess
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
 
         runner = CliRunner()
         result = runner.invoke(main, ["init", "--theme", "software"])
@@ -179,7 +179,7 @@ class TestInitScaffolding:
         """Nautical theme should install /expedition skill (not /feature)."""
         monkeypatch.chdir(tmp_path)
         import subprocess
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
 
         runner = CliRunner()
         result = runner.invoke(main, ["init", "--theme", "nautical"])
@@ -197,7 +197,7 @@ class TestInitScaffolding:
         """Software /feature skill should reference FEAT-, not EXP-."""
         monkeypatch.chdir(tmp_path)
         import subprocess
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
 
         runner = CliRunner()
         runner.invoke(main, ["init", "--theme", "software"])

@@ -14,6 +14,7 @@ from typing import Any
 
 class WorkItemStatus(Enum):
     """Standard work item statuses."""
+
     BACKLOG = "backlog"
     READY = "ready"
     IN_PROGRESS = "in_progress"
@@ -33,6 +34,7 @@ class WorkItemStatus(Enum):
 
 class WorkItemType(Enum):
     """Standard work item types (supports both software and nautical themes)."""
+
     # Software theme
     FEATURE = "feature"
     BUG = "bug"
@@ -61,6 +63,7 @@ class WorkItemType(Enum):
 @dataclass
 class Comment:
     """A comment on a work item."""
+
     content: str
     author: str
     created_at: datetime = field(default_factory=datetime.now)
@@ -76,6 +79,7 @@ class Comment:
 @dataclass
 class Column:
     """A kanban column definition."""
+
     id: str
     name: str
     order: int
@@ -110,6 +114,8 @@ class WorkItem:
     description: str | None = None
     comments: list[Comment] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    resolution: str | None = None  # completed, superseded, wont_do, duplicate, obsolete, merged
+    superseded_by: list[str] = field(default_factory=list)  # list of item IDs
 
     def __post_init__(self):
         if self.updated is None:
@@ -153,40 +159,49 @@ class WorkItem:
             "depends_on": self.depends_on,
             "blocks": self.blocks,
             "description": self.description,
+            "resolution": self.resolution,
+            "superseded_by": self.superseded_by,
         }
 
     def to_yurtle(self) -> str:
         """Generate Yurtle block content for this work item."""
         lines = [
-            '@prefix kb: <https://yurtle.dev/kanban/> .',
-            '@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .',
-            '',
-            f'<> a kb:{self.item_type.value.title()} ;',
+            "@prefix kb: <https://yurtle.dev/kanban/> .",
+            "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .",
+            "",
+            f"<> a kb:{self.item_type.value.title()} ;",
             f'   kb:id "{self.id}" ;',
-            f'   kb:status kb:{self.status.value} ;',
+            f"   kb:status kb:{self.status.value} ;",
         ]
 
         if self.priority:
-            lines.append(f'   kb:priority kb:{self.priority} ;')
+            lines.append(f"   kb:priority kb:{self.priority} ;")
 
         if self.assignee:
-            lines.append(f'   kb:assignee <{self.assignee}> ;')
+            lines.append(f"   kb:assignee <{self.assignee}> ;")
 
         if self.created:
             lines.append(f'   kb:created "{self.created.isoformat()}"^^xsd:date ;')
 
         if self.tags:
-            tag_str = ', '.join(f'"{tag}"' for tag in self.tags)
-            lines.append(f'   kb:tag {tag_str} ;')
+            tag_str = ", ".join(f'"{tag}"' for tag in self.tags)
+            lines.append(f"   kb:tag {tag_str} ;")
 
         if self.depends_on:
-            deps_str = ', '.join(f'<{dep}>' for dep in self.depends_on)
-            lines.append(f'   kb:dependsOn {deps_str} ;')
+            deps_str = ", ".join(f"<{dep}>" for dep in self.depends_on)
+            lines.append(f"   kb:dependsOn {deps_str} ;")
+
+        if self.resolution:
+            lines.append(f'   kb:resolution "{self.resolution}" ;')
+
+        if self.superseded_by:
+            refs_str = ", ".join(f"<{ref}>" for ref in self.superseded_by)
+            lines.append(f"   kb:supersededBy {refs_str} ;")
 
         # Remove trailing semicolon from last line and add period
-        lines[-1] = lines[-1].rstrip(' ;') + ' .'
+        lines[-1] = lines[-1].rstrip(" ;") + " ."
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     def to_markdown(self) -> str:
         """Generate full markdown file content.
@@ -196,43 +211,51 @@ class WorkItem:
         """
         lines = [
             "---",
-            f'id: {self.id}',
+            f"id: {self.id}",
             f'title: "{self.title}"',
-            f'type: {self.item_type.value}',
-            f'status: {self.status.value}',
+            f"type: {self.item_type.value}",
+            f"status: {self.status.value}",
         ]
 
         if self.priority:
-            lines.append(f'priority: {self.priority}')
+            lines.append(f"priority: {self.priority}")
         if self.assignee:
-            lines.append(f'assignee: {self.assignee}')
+            lines.append(f"assignee: {self.assignee}")
         if self.created:
-            lines.append(f'created: {self.created.isoformat()}')
+            lines.append(f"created: {self.created.isoformat()}")
         if self.tags:
-            lines.append(f'tags: [{", ".join(self.tags)}]')
+            lines.append(f"tags: [{', '.join(self.tags)}]")
 
         # Always include depends_on (even if empty)
         if self.depends_on:
-            lines.append(f'depends_on: [{", ".join(self.depends_on)}]')
+            lines.append(f"depends_on: [{', '.join(self.depends_on)}]")
         else:
-            lines.append('depends_on: []')
+            lines.append("depends_on: []")
 
-        lines.extend([
-            "---",
-            "",
-            f"# {self.title}",
-            "",
-        ])
+        if self.resolution:
+            lines.append(f"resolution: {self.resolution}")
+        if self.superseded_by:
+            lines.append(f"superseded_by: [{', '.join(self.superseded_by)}]")
+
+        lines.extend(
+            [
+                "---",
+                "",
+                f"# {self.title}",
+                "",
+            ]
+        )
 
         if self.description:
             lines.append(self.description)
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
 
 @dataclass
 class Board:
     """A kanban board containing work items organized by columns."""
+
     id: str
     name: str
     columns: list[Column]

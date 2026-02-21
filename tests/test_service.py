@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 import yaml
+from click.testing import CliRunner
 
+from yurtle_kanban.cli import main
 from yurtle_kanban.config import KanbanConfig, PathConfig
-from yurtle_kanban.models import WorkItemType
+from yurtle_kanban.models import WorkItemStatus, WorkItemType
 from yurtle_kanban.service import KanbanService
 
 
@@ -17,7 +19,7 @@ def temp_repo(tmp_path):
     """Create a minimal git repo with kanban config."""
     # Init git repo
     import subprocess
-    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
         cwd=tmp_path, capture_output=True, check=True,
@@ -210,12 +212,18 @@ class TestCreateItemAndPush:
         # Create a bare repo to act as remote
         remote_path = tmp_path / "remote.git"
         remote_path.mkdir()
-        subprocess.run(["git", "init", "--bare"], cwd=remote_path, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "init", "--bare", "-b", "main"],
+            cwd=remote_path, capture_output=True, check=True,
+        )
 
         # Create working repo
         work_path = tmp_path / "work"
         work_path.mkdir()
-        subprocess.run(["git", "init"], cwd=work_path, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "init", "-b", "main"],
+            cwd=work_path, capture_output=True, check=True,
+        )
         subprocess.run(
             ["git", "config", "user.email", "test@test.com"],
             cwd=work_path, capture_output=True, check=True,
@@ -415,3 +423,148 @@ class TestGetTypeDirectory:
         path = svc._get_type_directory(WorkItemType.FEATURE)
 
         assert path == temp_repo / "work/"
+
+
+class TestForceAuditTrail:
+    """Test that forced moves leave an audit trail in the status history."""
+
+    def test_forced_move_records_audit_triple(self, temp_repo, nautical_config):
+        """Forced moves should include kb:forcedMove in status history."""
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(WorkItemType.EXPEDITION, "Test Force Audit")
+
+        # Move to in_progress with force (skipping validation)
+        svc.move_item(
+            item.id,
+            WorkItemStatus.IN_PROGRESS,
+            commit=False,
+            skip_wip_check=True,
+            validate_workflow=False,
+        )
+
+        content = item.file_path.read_text()
+        assert 'kb:forcedMove "true"' in content
+
+    def test_normal_move_no_forced_triple(self, temp_repo, nautical_config):
+        """Normal moves should NOT include kb:forcedMove."""
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(
+            WorkItemType.EXPEDITION, "Test Normal Move",
+            assignee="Agent-A",
+            description="Has a description for rules."
+        )
+
+        # backlog → ready is a valid default transition
+        svc.move_item(
+            item.id,
+            WorkItemStatus.READY,
+            commit=False,
+        )
+
+        content = item.file_path.read_text()
+        assert "forcedMove" not in content
+
+    def test_forced_move_only_skip_wip_not_marked_forced(self, temp_repo, nautical_config):
+        """skip_wip_check=True with validate_workflow=True should NOT be marked forced."""
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(
+            WorkItemType.EXPEDITION, "Test WIP-only skip",
+            assignee="Agent-A",
+            description="Has description."
+        )
+
+        # backlog → ready is valid, skip WIP but keep workflow validation
+        svc.move_item(
+            item.id,
+            WorkItemStatus.READY,
+            commit=False,
+            skip_wip_check=True,
+            validate_workflow=True,
+        )
+
+        content = item.file_path.read_text()
+        assert "forcedMove" not in content
+
+    def test_status_history_includes_forced_flag(self, temp_repo, nautical_config):
+        """get_status_history() should parse forced flag from TTL entries."""
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(
+            WorkItemType.EXPEDITION, "Test History Forced",
+            assignee="Agent-A",
+            description="Has description."
+        )
+
+        # Normal move: backlog → ready
+        svc.move_item(item.id, WorkItemStatus.READY, commit=False)
+
+        # Forced move: ready → in_progress
+        svc.move_item(
+            item.id,
+            WorkItemStatus.IN_PROGRESS,
+            commit=False,
+            skip_wip_check=True,
+            validate_workflow=False,
+        )
+
+        history = svc.get_status_history(item.id)
+        assert len(history) == 2
+
+        # First entry (normal) should not be forced
+        assert history[0]["forced"] is False
+        # Second entry (forced) should be forced
+        assert history[1]["forced"] is True
+
+    def test_resolution_fields_parsed_from_file(self, temp_repo, nautical_config):
+        """Service should parse resolution and superseded_by from frontmatter."""
+        exp_dir = temp_repo / "kanban-work" / "expeditions"
+        (exp_dir / "EXP-001-Closed-Item.md").write_text(
+            "---\n"
+            "id: EXP-001\n"
+            "title: Closed Item\n"
+            "type: expedition\n"
+            "status: done\n"
+            "resolution: superseded\n"
+            "superseded_by: [EXP-002, EXP-003]\n"
+            "depends_on: []\n"
+            "---\n\n# Closed Item\n"
+        )
+
+        svc = KanbanService(nautical_config, temp_repo)
+        svc.scan()
+        item = svc.get_item("EXP-001")
+
+        assert item is not None
+        assert item.resolution == "superseded"
+        assert item.superseded_by == ["EXP-002", "EXP-003"]
+
+
+class TestForceCliIntegration:
+    """Test that --force flag wires correctly through the CLI layer."""
+
+    def test_force_flag_skips_workflow_and_wip(self, temp_repo, nautical_config, monkeypatch):
+        """CLI --force should pass skip_wip_check=True, validate_workflow=False."""
+        runner = CliRunner()
+
+        # Create an item first
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(
+            WorkItemType.EXPEDITION, "CLI Force Test",
+            assignee="Agent-A",
+            description="Has description.",
+        )
+
+        # CLI needs to run from repo root so get_service() finds .kanban/config.yaml
+        monkeypatch.chdir(temp_repo)
+
+        # Move via CLI with --force
+        result = runner.invoke(
+            main,
+            ["move", item.id, "ready", "--force", "--no-commit"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "Moved" in result.output
+
+        # Verify the forced move was recorded in the file
+        content = item.file_path.read_text()
+        assert 'kb:forcedMove "true"' in content
