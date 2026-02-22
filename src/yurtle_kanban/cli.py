@@ -444,16 +444,23 @@ def move(
 
 @main.command()
 @click.argument("item_id")
-def show(item_id: str):
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def show(item_id: str, as_json: bool):
     """Show details of a work item."""
     service = get_service()
 
     item = service.get_item(item_id.upper())
     if not item:
-        console.print(f"[red]Item not found: {item_id}[/red]")
+        if as_json:
+            click.echo(json.dumps({"error": f"Item not found: {item_id}"}))
+        else:
+            console.print(f"[red]Item not found: {item_id}[/red]")
         sys.exit(1)
 
-    render_item_detail(item, console)
+    if as_json:
+        click.echo(json.dumps(item.to_dict(), indent=2))
+    else:
+        render_item_detail(item, console)
 
 
 @main.command()
@@ -804,7 +811,8 @@ def next_id(prefix: str, no_sync: bool, no_commit: bool, as_json: bool):
 
 @main.command()
 @click.option("--fix", is_flag=True, help="Attempt to fix issues (rename files)")
-def validate(fix: bool):
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def validate(fix: bool, as_json: bool):
     """Validate work items for consistency issues.
 
     Checks:
@@ -850,6 +858,17 @@ def validate(fix: bool):
                     "message": f"File name '{file_stem}' doesn't start with ID '{expected_prefix}'",
                 }
             )
+
+    if as_json:
+        result = {
+            "valid": len(issues) == 0,
+            "items_checked": len(items),
+            "issues": issues,
+        }
+        click.echo(json.dumps(result, indent=2))
+        if issues:
+            sys.exit(1)
+        return
 
     if not issues:
         console.print("[green]All work items valid.[/green]")

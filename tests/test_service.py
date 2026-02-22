@@ -568,3 +568,88 @@ class TestForceCliIntegration:
         # Verify the forced move was recorded in the file
         content = item.file_path.read_text()
         assert 'kb:forcedMove "true"' in content
+
+
+class TestShowJson:
+    """Test show --json CLI output."""
+
+    def test_show_json_outputs_item_dict(self, temp_repo, nautical_config, monkeypatch):
+        """show --json should output valid JSON with item fields."""
+        runner = CliRunner()
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(WorkItemType.EXPEDITION, "JSON Test")
+        monkeypatch.chdir(temp_repo)
+
+        result = runner.invoke(main, ["show", item.id, "--json"], catch_exceptions=False)
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["id"] == item.id
+        assert data["title"] == "JSON Test"
+        assert data["status"] == "backlog"
+
+    def test_show_json_not_found(self, temp_repo, nautical_config, monkeypatch):
+        """show --json with bad ID should output JSON error and exit 1."""
+        runner = CliRunner()
+        monkeypatch.chdir(temp_repo)
+
+        result = runner.invoke(main, ["show", "EXP-999", "--json"], catch_exceptions=False)
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert "error" in data
+
+    def test_show_without_json_still_works(self, temp_repo, nautical_config, monkeypatch):
+        """show without --json should still render Rich output."""
+        runner = CliRunner()
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(WorkItemType.EXPEDITION, "Rich Test")
+        monkeypatch.chdir(temp_repo)
+
+        result = runner.invoke(main, ["show", item.id], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert "Rich Test" in result.output
+
+
+class TestValidateJson:
+    """Test validate --json CLI output."""
+
+    def test_validate_json_clean(self, temp_repo, nautical_config, monkeypatch):
+        """validate --json with no issues should return valid=true."""
+        runner = CliRunner()
+        svc = KanbanService(nautical_config, temp_repo)
+        svc.create_item(WorkItemType.EXPEDITION, "Valid Item")
+        monkeypatch.chdir(temp_repo)
+
+        result = runner.invoke(main, ["validate", "--json"], catch_exceptions=False)
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["valid"] is True
+        assert data["issues"] == []
+        assert data["items_checked"] >= 1
+
+    def test_validate_json_filename_mismatch(self, temp_repo, nautical_config, monkeypatch):
+        """validate --json should report filename mismatches."""
+        runner = CliRunner()
+        exp_dir = temp_repo / "kanban-work" / "expeditions"
+
+        # File name doesn't match ID in frontmatter
+        (exp_dir / "WRONG-NAME.md").write_text(
+            "---\nid: EXP-002\ntitle: Mismatched\ntype: expedition\nstatus: backlog\n---\n"
+        )
+        monkeypatch.chdir(temp_repo)
+
+        result = runner.invoke(main, ["validate", "--json"], catch_exceptions=False)
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["valid"] is False
+        assert any(i["type"] == "filename_mismatch" for i in data["issues"])
+
+    def test_validate_without_json_still_works(self, temp_repo, nautical_config, monkeypatch):
+        """validate without --json should still render Rich output."""
+        runner = CliRunner()
+        svc = KanbanService(nautical_config, temp_repo)
+        svc.create_item(WorkItemType.EXPEDITION, "Valid Item")
+        monkeypatch.chdir(temp_repo)
+
+        result = runner.invoke(main, ["validate"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert "All work items valid" in result.output
