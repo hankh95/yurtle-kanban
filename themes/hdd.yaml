@@ -77,6 +77,14 @@ columns:
     order: 4
     description: "Superseded or paper dropped"
 
+# Valid state transitions (for research integrity)
+# Prevents jumping from draft→complete, enforcing the experimental process
+transitions:
+  draft: [active, abandoned]
+  active: [complete, abandoned, draft]
+  complete: []  # Terminal state (can reopen via new hypothesis if needed)
+  abandoned: [draft]  # Can resurrect abandoned work
+
 # ID format specifications
 # These are used by CLI commands to generate proper IDs
 id_formats:

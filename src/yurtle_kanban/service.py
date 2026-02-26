@@ -8,16 +8,22 @@ This service provides the business logic for:
 - Item creation and updates
 """
 
+from __future__ import annotations
+
+import fnmatch
 import logging
 import re
 import subprocess
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from .config import KanbanConfig
+
+if TYPE_CHECKING:
+    from .config import BoardConfig
 from .models import Board, Column, Comment, WorkItem, WorkItemStatus, WorkItemType
 from .workflow import WorkflowConfig, WorkflowParser
 
@@ -66,14 +72,8 @@ class KanbanService:
         """Check if a path should be ignored."""
         path_str = str(path.relative_to(self.repo_root))
         for pattern in self.config.paths.ignore:
-            # Simple glob-style matching
-            if "**" in pattern:
-                pattern_part = pattern.replace("**", "").strip("/")
-                if pattern_part in path_str:
-                    return True
-            elif pattern.startswith("*"):
-                if path_str.endswith(pattern[1:]):
-                    return True
+            if fnmatch.fnmatch(path_str, pattern):
+                return True
         return False
 
     def _parse_file(self, file_path: Path) -> WorkItem | None:
@@ -294,7 +294,8 @@ class KanbanService:
         if board_name:
             board_config = self.config.get_board(board_name)
             if not board_config:
-                # Fall back to default
+                # Warn user and fall back to default
+                logger.warning(f"Board '{board_name}' not found, falling back to default")
                 board_config = self.config.get_default_board()
         else:
             # Try to detect from current working directory
@@ -327,7 +328,7 @@ class KanbanService:
             column_status_map=column_status_map,
         )
 
-    def _scan_board(self, board_config: "BoardConfig") -> list[WorkItem]:  # noqa: F821
+    def _scan_board(self, board_config: BoardConfig) -> list[WorkItem]:
         """Scan a specific board for work items.
 
         Args:
@@ -336,8 +337,6 @@ class KanbanService:
         Returns:
             List of work items found in the board's path
         """
-        from .config import BoardConfig
-
         items = []
         board_path = self.repo_root / board_config.path
 
@@ -353,7 +352,7 @@ class KanbanService:
 
         return items
 
-    def _should_ignore_for_board(self, path: Path, board_config: "BoardConfig") -> bool:  # noqa: F821
+    def _should_ignore_for_board(self, path: Path, board_config: BoardConfig) -> bool:
         """Check if a path should be ignored for a specific board.
 
         Args:
@@ -369,14 +368,8 @@ class KanbanService:
             path_str = str(path)
 
         for pattern in board_config.ignore:
-            # Simple glob-style matching
-            if "**" in pattern:
-                pattern_part = pattern.replace("**", "").strip("/")
-                if pattern_part in path_str:
-                    return True
-            elif pattern.startswith("*"):
-                if path_str.endswith(pattern[1:]):
-                    return True
+            if fnmatch.fnmatch(path_str, pattern):
+                return True
         return False
 
     def _get_columns_from_preset(self, preset: str) -> list[Column]:

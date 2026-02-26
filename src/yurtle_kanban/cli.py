@@ -570,11 +570,18 @@ def board_add(name: str, preset: str, path: str, wip_limit: tuple[str, ...], mak
         yurtle-kanban board-add development --preset nautical --path kanban-work/ --default
         yurtle-kanban board-add tasks --preset software --path work/ --wip-limit in_progress:3
     """
-    from .config import BoardConfig, CONFIG_VERSION_MULTI
+    from .config import BoardConfig, CONFIG_VERSION_MULTI, _load_builtin_theme
 
     service = get_service()
     config = service.config
     repo_root = service.repo_root
+
+    # Validate preset exists
+    if not _load_builtin_theme(preset, repo_root):
+        available = ["software", "nautical", "spec", "hdd"]
+        console.print(f"[red]Unknown preset: {preset}[/red]")
+        console.print(f"[dim]Available presets: {', '.join(available)}[/dim]")
+        sys.exit(1)
 
     # Parse WIP limits
     wip_limits = {}
