@@ -204,6 +204,27 @@ Expedition (EXP-), Voyage (VOY-), Chore (CHORE-), Hazard (HAZ-), Signal (SIG-)
 Columns: Harbor → Provisioning → Underway → Approaching Port → Arrived (+ Stranded)
 ```
 
+**HDD (Hypothesis-Driven Development):**
+```
+Idea (IDEA-R-), Literature (LIT-), Paper (PAPER-), Hypothesis (H{paper}.{n}), Experiment (EXPR-), Measure (M-)
+Columns: Draft → Active → Complete → Abandoned
+```
+
+Use HDD for research workflows where experiments validate enhancements before merging:
+
+```bash
+# Add HDD board for research
+yurtle-kanban board-add research --preset hdd --path research/
+
+# Create HDD items
+yurtle-kanban create --board research idea "Research question"
+yurtle-kanban create --board research hypothesis "H42.1: Caching improves latency"
+yurtle-kanban create --board research experiment "EXPR-42"
+
+# View research board
+yurtle-kanban board research
+```
+
 **Custom:** Define your own in `themes/my-theme.yaml`
 
 ## MCP Server for AI Agents
