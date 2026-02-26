@@ -1,0 +1,105 @@
+theme:
+  name: hdd
+  description: "Hypothesis-Driven Development for research workflows"
+
+# HDD Item Types
+# These map to the standard HDD workflow: Idea -> Literature -> Hypothesis -> Experiment -> Result
+item_types:
+  idea:
+    id_prefix: "IDEA-R"
+    icon: "?"
+    plural: "Research Ideas"
+    path: "research/ideas/"
+    color: "#F59E0B"
+    description: "Research ideas that may become hypotheses"
+
+  literature:
+    id_prefix: "LIT"
+    icon: "L"
+    plural: "Literature Reviews"
+    path: "research/literature/"
+    color: "#8B5CF6"
+    description: "LLM-assisted framework and prior art discovery"
+
+  paper:
+    id_prefix: "PAPER"
+    icon: "P"
+    plural: "Papers"
+    path: "research/papers/"
+    color: "#06B6D4"
+    description: "Research paper drafts and publications"
+
+  hypothesis:
+    id_prefix: "H"
+    icon: "H"
+    plural: "Hypotheses"
+    path: "research/hypotheses/"
+    color: "#10B981"
+    description: "Testable hypotheses with target metrics"
+
+  experiment:
+    id_prefix: "EXPR"
+    icon: "E"
+    plural: "Experiments"
+    path: "research/experiments/"
+    color: "#3B82F6"
+    description: "Experiment protocols and results"
+
+  measure:
+    id_prefix: "M"
+    icon: "M"
+    plural: "Measures"
+    path: "research/measures/"
+    color: "#6366F1"
+    description: "Metric definitions for experiments"
+
+# HDD uses simplified coarse states on the board
+# Fine-grained status (planned, running, analyzing) tracked in experiment files
+columns:
+  draft:
+    name: "Draft"
+    order: 1
+    description: "Initial capture, not yet actionable"
+
+  active:
+    name: "Active"
+    order: 2
+    wip_limit: 5
+    description: "Work in progress (combines planned/running/analyzing)"
+
+  complete:
+    name: "Complete"
+    order: 3
+    description: "Hypothesis validated or refuted (both are valid outcomes)"
+
+  abandoned:
+    name: "Abandoned"
+    order: 4
+    description: "Superseded or paper dropped"
+
+# Valid state transitions (for research integrity)
+# Prevents jumping from draft→complete, enforcing the experimental process
+transitions:
+  draft: [active, abandoned]
+  active: [complete, abandoned, draft]
+  complete: []  # Terminal state (can reopen via new hypothesis if needed)
+  abandoned: [draft]  # Can resurrect abandoned work
+
+# ID format specifications
+# These are used by CLI commands to generate proper IDs
+id_formats:
+  idea_research: "IDEA-R-{N:03d}"
+  idea_feature: "IDEA-F-{N:03d}"
+  literature: "LIT-{N:03d}"
+  paper: "PAPER-{N}"
+  hypothesis: "H{paper}.{n}"
+  hypothesis_draft: "H-DRAFT-{N:03d}"
+  experiment: "EXPR-{paper}"
+  measure: "M-{N:03d}"
+
+# State mappings for compatibility with WorkItemStatus
+status_mappings:
+  draft: backlog
+  active: in_progress
+  complete: done
+  abandoned: blocked

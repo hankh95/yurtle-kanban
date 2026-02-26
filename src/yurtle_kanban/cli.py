@@ -464,11 +464,178 @@ def show(item_id: str, as_json: bool):
 
 
 @main.command()
-def board():
-    """Show the kanban board view."""
+@click.argument("board_name", required=False)
+@click.option("--all", "show_all", is_flag=True, help="Show all boards (multi-board mode)")
+def board(board_name: str | None, show_all: bool):
+    """Show the kanban board view.
+
+    In multi-board mode, specify BOARD_NAME to view a specific board.
+    Without arguments, shows the default board (or the board matching current directory).
+
+    Examples:
+        yurtle-kanban board                 # Show default/current board
+        yurtle-kanban board research        # Show the 'research' board
+        yurtle-kanban board development     # Show the 'development' board
+        yurtle-kanban board --all           # Show all boards
+    """
     service = get_service()
-    board = service.get_board()
-    render_board(board, console)
+    config = service.config
+
+    if show_all and config.is_multi_board:
+        # Show all boards
+        for board_config in config.boards:
+            console.print(f"\n[bold cyan]Board: {board_config.name}[/bold cyan]")
+            console.print(f"  Preset: {board_config.preset}")
+            console.print(f"  Path: {board_config.path}")
+            board_data = service.get_board(board_name=board_config.name)
+            render_board(board_data, console)
+            console.print()
+        return
+
+    board_data = service.get_board(board_name=board_name)
+    render_board(board_data, console)
+
+
+@main.command("boards")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def list_boards(as_json: bool):
+    """List all configured boards.
+
+    Shows all boards in a multi-board configuration.
+    For single-board configs, shows the default board.
+
+    Examples:
+        yurtle-kanban boards
+        yurtle-kanban boards --json
+    """
+    service = get_service()
+    config = service.config
+
+    if not config.is_multi_board:
+        # Single-board mode
+        boards_info = [{
+            "name": "default",
+            "preset": config.theme,
+            "path": config.paths.root or "work/",
+            "default": True,
+        }]
+    else:
+        boards_info = []
+        for board_config in config.boards:
+            boards_info.append({
+                "name": board_config.name,
+                "preset": board_config.preset,
+                "path": board_config.path,
+                "default": board_config.name == config.default_board,
+                "wip_limits": board_config.wip_limits,
+            })
+
+    if as_json:
+        click.echo(json.dumps({"boards": boards_info, "multi_board": config.is_multi_board}, indent=2))
+        return
+
+    if not config.is_multi_board:
+        console.print("[dim]Single-board mode. Use 'yurtle-kanban init --multi-board' to enable multi-board.[/dim]")
+        console.print()
+        console.print(f"[bold]Board:[/bold] default")
+        console.print(f"  Preset: {config.theme}")
+        console.print(f"  Path: {config.paths.root or 'work/'}")
+    else:
+        console.print(f"[bold]Configured Boards ({len(config.boards)})[/bold]")
+        console.print()
+        for info in boards_info:
+            default_marker = " [cyan](default)[/cyan]" if info.get("default") else ""
+            console.print(f"  [bold]{info['name']}[/bold]{default_marker}")
+            console.print(f"    Preset: {info['preset']}")
+            console.print(f"    Path: {info['path']}")
+            if info.get("wip_limits"):
+                wip_str = ", ".join(f"{k}: {v}" for k, v in info["wip_limits"].items())
+                console.print(f"    WIP Limits: {wip_str}")
+            console.print()
+
+
+@main.command("board-add")
+@click.argument("name")
+@click.option("--preset", "-p", default="software", help="Preset/theme to use (default: software)")
+@click.option("--path", required=True, help="Path for board's work items")
+@click.option("--wip-limit", "-w", multiple=True, help="WIP limit as 'status:limit' (e.g., 'in_progress:3')")
+@click.option("--default", "make_default", is_flag=True, help="Make this the default board")
+def board_add(name: str, preset: str, path: str, wip_limit: tuple[str, ...], make_default: bool):
+    """Add a new board to the configuration.
+
+    If this is currently a single-board configuration, upgrades to multi-board mode.
+
+    Examples:
+        yurtle-kanban board-add research --preset hdd --path research/
+        yurtle-kanban board-add development --preset nautical --path kanban-work/ --default
+        yurtle-kanban board-add tasks --preset software --path work/ --wip-limit in_progress:3
+    """
+    from .config import BoardConfig, CONFIG_VERSION_MULTI, _load_builtin_theme
+
+    service = get_service()
+    config = service.config
+    repo_root = service.repo_root
+
+    # Validate preset exists
+    if not _load_builtin_theme(preset, repo_root):
+        available = ["software", "nautical", "spec", "hdd"]
+        console.print(f"[red]Unknown preset: {preset}[/red]")
+        console.print(f"[dim]Available presets: {', '.join(available)}[/dim]")
+        sys.exit(1)
+
+    # Parse WIP limits
+    wip_limits = {}
+    for wip in wip_limit:
+        if ":" in wip:
+            status, limit = wip.split(":", 1)
+            try:
+                wip_limits[status] = int(limit)
+            except ValueError:
+                console.print(f"[red]Invalid WIP limit: {wip}[/red]")
+                sys.exit(1)
+
+    # Check if board already exists
+    if config.is_multi_board and config.get_board(name):
+        console.print(f"[red]Board '{name}' already exists[/red]")
+        sys.exit(1)
+
+    # Create the new board config
+    new_board = BoardConfig(
+        name=name,
+        preset=preset,
+        path=path,
+        wip_limits=wip_limits,
+    )
+
+    # Add to configuration
+    config.add_board(new_board)
+
+    # Set as default if requested
+    if make_default:
+        config.default_board = name
+
+    # Save config
+    config_path = repo_root / ".kanban" / "config.yaml"
+    config.save(config_path)
+
+    # Create the path directory if it doesn't exist
+    board_path = repo_root / path
+    if not board_path.exists():
+        board_path.mkdir(parents=True, exist_ok=True)
+        console.print(f"[green]Created directory: {path}[/green]")
+
+    console.print(f"[green]Added board '{name}'[/green]")
+    console.print(f"  Preset: {preset}")
+    console.print(f"  Path: {path}")
+    if wip_limits:
+        wip_str = ", ".join(f"{k}: {v}" for k, v in wip_limits.items())
+        console.print(f"  WIP Limits: {wip_str}")
+    if make_default:
+        console.print(f"  [cyan]Set as default board[/cyan]")
+
+    if not config.is_multi_board:
+        console.print()
+        console.print("[dim]Note: Configuration upgraded to multi-board mode.[/dim]")
 
 
 @main.command()
