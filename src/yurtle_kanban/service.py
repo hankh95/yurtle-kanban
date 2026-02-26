@@ -250,8 +250,23 @@ class KanbanService:
         }
         return mapping.get(status_str.lower())
 
-    def get_board(self) -> Board:
-        """Get the kanban board with all items."""
+    def get_board(self, board_name: str | None = None) -> Board:
+        """Get the kanban board with all items.
+
+        In multi-board mode, specify board_name to get a specific board.
+        Without arguments, returns the default board.
+
+        Args:
+            board_name: Name of the board (multi-board mode) or None for default
+
+        Returns:
+            Board object with items and column configuration
+        """
+        # Multi-board mode
+        if self.config.is_multi_board:
+            return self._get_board_multi(board_name)
+
+        # Single-board mode (cached)
         if self._board is None:
             items = self.scan()
             columns = self._get_columns_from_theme()
@@ -264,6 +279,142 @@ class KanbanService:
                 column_status_map=column_status_map,
             )
         return self._board
+
+    def _get_board_multi(self, board_name: str | None = None) -> Board:
+        """Get a specific board in multi-board mode.
+
+        Args:
+            board_name: Name of the board, or None for default/cwd-matched board
+
+        Returns:
+            Board object for the specified board
+        """
+        board_config = None
+
+        if board_name:
+            board_config = self.config.get_board(board_name)
+            if not board_config:
+                # Fall back to default
+                board_config = self.config.get_default_board()
+        else:
+            # Try to detect from current working directory
+            cwd = Path.cwd()
+            board_config = self.config.get_board_for_path(cwd, self.repo_root)
+            if not board_config:
+                board_config = self.config.get_default_board()
+
+        if not board_config:
+            # No board found, return empty board
+            return Board(
+                id="empty",
+                name="No Board Configured",
+                columns=[],
+                items=[],
+            )
+
+        # Scan items for this board only
+        items = self._scan_board(board_config)
+
+        # Get columns from board's preset
+        columns = self._get_columns_from_preset(board_config.preset)
+        column_status_map = self._get_column_status_map()
+
+        return Board(
+            id=board_config.name,
+            name=f"{board_config.name.title()} Board",
+            columns=columns,
+            items=items,
+            column_status_map=column_status_map,
+        )
+
+    def _scan_board(self, board_config: "BoardConfig") -> list[WorkItem]:  # noqa: F821
+        """Scan a specific board for work items.
+
+        Args:
+            board_config: Configuration for the board to scan
+
+        Returns:
+            List of work items found in the board's path
+        """
+        from .config import BoardConfig
+
+        items = []
+        board_path = self.repo_root / board_config.path
+
+        if board_path.exists():
+            for md_file in board_path.rglob("*.md"):
+                # Check board-specific ignore patterns
+                if self._should_ignore_for_board(md_file, board_config):
+                    continue
+
+                item = self._parse_file(md_file)
+                if item:
+                    items.append(item)
+
+        return items
+
+    def _should_ignore_for_board(self, path: Path, board_config: "BoardConfig") -> bool:  # noqa: F821
+        """Check if a path should be ignored for a specific board.
+
+        Args:
+            path: File path to check
+            board_config: Board configuration with ignore patterns
+
+        Returns:
+            True if the path should be ignored
+        """
+        try:
+            path_str = str(path.relative_to(self.repo_root))
+        except ValueError:
+            path_str = str(path)
+
+        for pattern in board_config.ignore:
+            # Simple glob-style matching
+            if "**" in pattern:
+                pattern_part = pattern.replace("**", "").strip("/")
+                if pattern_part in path_str:
+                    return True
+            elif pattern.startswith("*"):
+                if path_str.endswith(pattern[1:]):
+                    return True
+        return False
+
+    def _get_columns_from_preset(self, preset: str) -> list[Column]:
+        """Get column definitions from a preset/theme.
+
+        Args:
+            preset: Name of the preset (e.g., 'software', 'nautical', 'hdd')
+
+        Returns:
+            List of Column objects
+        """
+        from .config import _load_builtin_theme
+
+        theme = _load_builtin_theme(preset, self.repo_root)
+        columns = []
+
+        if theme and "columns" in theme:
+            for col_id, col_def in theme["columns"].items():
+                columns.append(
+                    Column(
+                        id=col_id,
+                        name=col_def.get("name", col_id.title()),
+                        order=col_def.get("order", 0),
+                        wip_limit=col_def.get("wip_limit"),
+                        description=col_def.get("description"),
+                    )
+                )
+        else:
+            # Default columns
+            columns = [
+                Column(id="backlog", name="Backlog", order=1),
+                Column(id="ready", name="Ready", order=2),
+                Column(id="in_progress", name="In Progress", order=3, wip_limit=3),
+                Column(id="review", name="Review", order=4),
+                Column(id="done", name="Done", order=5),
+            ]
+
+        return sorted(columns, key=lambda c: c.order)
 
     def _get_column_status_map(self) -> dict[str, WorkItemStatus]:
         """Get mapping from column IDs to WorkItemStatus for themed columns."""
