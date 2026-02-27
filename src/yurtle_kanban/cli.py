@@ -40,39 +40,45 @@ from .hdd_commands import experiment, hypothesis, idea, literature, measure, pap
 from .service import KanbanService
 
 
-def _get_templates_dir() -> Path:
-    """Get the path to the templates directory in the package."""
-    # Templates are at the package root level (not in src/)
+def _get_shared_data_dir(subdir: str) -> Path:
+    """Get the path to a shared data directory (templates, skills, themes).
+
+    Searches in priority order:
+    1. Package share directory (pip installed via Hatchling → share/yurtle-kanban/)
+    2. Development source repo (subdir at repo root)
+    3. Fallback relative to this file
+    """
+    import sys
+
+    # Priority 1: Package share directory (pip installed via Hatchling)
+    for path in sys.path:
+        share_path = Path(path).parent / "share" / "yurtle-kanban" / subdir
+        if share_path.exists():
+            return share_path
+
+    # Priority 2: Development source repo (subdir at repo root)
     try:
         import yurtle_kanban
 
         package_dir = Path(yurtle_kanban.__file__).parent.parent.parent
-        templates_dir = package_dir / "templates"
-        if templates_dir.exists():
-            return templates_dir
+        dev_dir = package_dir / subdir
+        if dev_dir.exists():
+            return dev_dir
     except Exception:
         pass
 
-    # Fallback: try relative to this file
-    templates_dir = Path(__file__).parent.parent.parent / "templates"
-    return templates_dir
+    # Fallback: relative to this file
+    return Path(__file__).parent.parent.parent / subdir
+
+
+def _get_templates_dir() -> Path:
+    """Get the path to the templates directory in the package."""
+    return _get_shared_data_dir("templates")
 
 
 def _get_skills_dir() -> Path:
     """Get the path to the skills directory in the package."""
-    try:
-        import yurtle_kanban
-
-        package_dir = Path(yurtle_kanban.__file__).parent.parent.parent
-        skills_dir = package_dir / "skills"
-        if skills_dir.exists():
-            return skills_dir
-    except Exception:
-        pass
-
-    # Fallback: try relative to this file
-    skills_dir = Path(__file__).parent.parent.parent / "skills"
-    return skills_dir
+    return _get_shared_data_dir("skills")
 
 
 console = Console()
