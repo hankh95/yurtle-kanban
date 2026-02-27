@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from .config import KanbanConfig
+from .hooks import HookContext, HookEngine, HookEvent
 
 if TYPE_CHECKING:
     from .config import BoardConfig
@@ -33,13 +34,16 @@ logger = logging.getLogger("yurtle-kanban")
 class KanbanService:
     """Service for managing kanban work items."""
 
-    def __init__(self, config: KanbanConfig, repo_root: Path):
+    def __init__(self, config: KanbanConfig, repo_root: Path, hooks_config: Path | None = None):
         self.config = config
         self.repo_root = repo_root
         self._items: dict[str, WorkItem] = {}
         self._board: Board | None = None
         self._workflow_parser = WorkflowParser(repo_root / ".kanban")
         self._workflows: dict[str, WorkflowConfig] = {}
+        self._hook_engine = HookEngine(
+            hooks_config or (repo_root / ".kanban" / "hooks" / "kanban-hooks.yurtle.md")
+        )
 
     def scan(self) -> list[WorkItem]:
         """Scan configured paths for work items."""
@@ -571,6 +575,9 @@ class KanbanService:
         # Add to cache
         self._items[item_id] = item
 
+        # Fire hooks (after successful create)
+        self._fire_create_hook(item)
+
         return item
 
     def _has_remote(self) -> bool:
@@ -711,6 +718,7 @@ class KanbanService:
             # Step 7: Push (only if remote exists)
             if not has_remote:
                 self._items[item_id] = item
+                self._fire_create_hook(item)
                 return {
                     "success": True,
                     "item": item,
@@ -729,6 +737,7 @@ class KanbanService:
 
             if push_result.returncode == 0:
                 self._items[item_id] = item
+                self._fire_create_hook(item)
                 return {
                     "success": True,
                     "item": item,
@@ -1079,7 +1088,36 @@ class KanbanService:
                     commit_msg += f" (assigned to {assignee})"
             self._git_commit(item.file_path, commit_msg)
 
+        # Fire hooks (after successful move)
+        self._hook_engine.trigger(
+            HookEvent.STATUS_CHANGE,
+            HookContext(
+                event=HookEvent.STATUS_CHANGE,
+                item_id=item.id,
+                item_type=item.item_type.value,
+                title=item.title,
+                old_status=old_status.value,
+                new_status=new_status.value,
+                assignee=item.assignee,
+                forced=forced,
+            ),
+        )
+
         return item
+
+    def _fire_create_hook(self, item: WorkItem) -> None:
+        """Fire on_create hooks after successful item creation."""
+        self._hook_engine.trigger(
+            HookEvent.ITEM_CREATED,
+            HookContext(
+                event=HookEvent.ITEM_CREATED,
+                item_id=item.id,
+                item_type=item.item_type.value,
+                title=item.title,
+                new_status=WorkItemStatus.BACKLOG.value,
+                assignee=item.assignee,
+            ),
+        )
 
     def _validate_transition(self, item: WorkItem, new_status: WorkItemStatus) -> tuple[bool, str]:
         """Validate a status transition using workflow rules if available.
