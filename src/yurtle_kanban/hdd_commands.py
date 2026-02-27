@@ -13,7 +13,6 @@ Provides Click subgroups for creating HDD research items:
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 import click
 from rich.console import Console
@@ -22,22 +21,6 @@ from .models import WorkItemStatus, WorkItemType
 from .template_engine import TemplateEngine
 
 console = Console()
-
-
-def _get_templates_dir() -> Path:
-    """Get the path to the templates directory in the package."""
-    try:
-        import yurtle_kanban
-
-        package_dir = Path(yurtle_kanban.__file__).parent.parent.parent
-        templates_dir = package_dir / "templates"
-        if templates_dir.exists():
-            return templates_dir
-    except Exception:
-        pass
-
-    # Fallback: try relative to this file
-    return Path(__file__).parent.parent.parent / "templates"
 
 
 def _get_service():
@@ -49,6 +32,9 @@ def _get_service():
 
 def _get_engine() -> TemplateEngine:
     """Get the template engine."""
+    # Import from cli.py to avoid duplication (lazy import to avoid circular import)
+    from .cli import _get_templates_dir
+
     return TemplateEngine(_get_templates_dir())
 
 
