@@ -395,3 +395,157 @@ class TestBoardForPath:
             repo_root=tmp_path,
         )
         assert board is None
+
+
+class TestHDDTypeRoutingMultiBoard:
+    """Issue #20: HDD item types must route to the research board in multi-board mode.
+
+    When a multi-board config has development (nautical) + research (hdd) boards,
+    HDD item types (hypothesis, experiment, literature, measure, paper, idea)
+    should be created in the research board's directories, not the development board's.
+    """
+
+    @pytest.fixture
+    def multiboard_hdd_setup(self, tmp_path):
+        """Create a multi-board environment with development + research boards."""
+        import subprocess
+
+        # Init git repo (needed for create_item_and_push)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=tmp_path, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=tmp_path, capture_output=True, check=True,
+        )
+
+        # Create config
+        config_path = tmp_path / ".kanban" / "config.yaml"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text("""
+version: "2.0"
+boards:
+  - name: development
+    preset: nautical
+    path: kanban-work/
+  - name: research
+    preset: hdd
+    path: research/
+default_board: development
+""")
+
+        # Create directory structure
+        for subdir in ["expeditions", "chores", "voyages"]:
+            (tmp_path / "kanban-work" / subdir).mkdir(parents=True)
+        for subdir in ["ideas", "literature", "papers", "hypotheses", "experiments", "measures"]:
+            (tmp_path / "research" / subdir).mkdir(parents=True)
+
+        config = KanbanConfig.load(config_path)
+        service = KanbanService(config, tmp_path)
+
+        return {"tmp_path": tmp_path, "config": config, "service": service}
+
+    def test_hypothesis_routes_to_research(self, multiboard_hdd_setup):
+        """Hypothesis should be created in research/hypotheses/, not kanban-work/."""
+        from yurtle_kanban.models import WorkItemType
+
+        service = multiboard_hdd_setup["service"]
+        tmp_path = multiboard_hdd_setup["tmp_path"]
+
+        item = service.create_item(
+            item_type=WorkItemType.HYPOTHESIS,
+            title="V12 improves accuracy",
+            item_id="H130.1",
+        )
+
+        assert "research/hypotheses/" in str(item.file_path)
+        assert "kanban-work" not in str(item.file_path)
+        assert item.file_path.exists()
+
+    def test_experiment_routes_to_research(self, multiboard_hdd_setup):
+        """Experiment should be created in research/experiments/."""
+        from yurtle_kanban.models import WorkItemType
+
+        service = multiboard_hdd_setup["service"]
+
+        item = service.create_item(
+            item_type=WorkItemType.EXPERIMENT,
+            title="V12 accuracy test",
+            item_id="EXPR-130",
+        )
+
+        assert "research/experiments/" in str(item.file_path)
+        assert "kanban-work" not in str(item.file_path)
+
+    def test_paper_routes_to_research(self, multiboard_hdd_setup):
+        """Paper should be created in research/papers/."""
+        from yurtle_kanban.models import WorkItemType
+
+        service = multiboard_hdd_setup["service"]
+
+        item = service.create_item(
+            item_type=WorkItemType.PAPER,
+            title="NuSy Brain Architecture",
+            item_id="PAPER-130",
+        )
+
+        assert "research/papers/" in str(item.file_path)
+
+    def test_literature_routes_to_research(self, multiboard_hdd_setup):
+        """Literature should be created in research/literature/."""
+        from yurtle_kanban.models import WorkItemType
+
+        service = multiboard_hdd_setup["service"]
+
+        item = service.create_item(
+            item_type=WorkItemType.LITERATURE,
+            title="Transfer learning survey",
+            item_id="LIT-001",
+        )
+
+        assert "research/literature/" in str(item.file_path)
+
+    def test_measure_routes_to_research(self, multiboard_hdd_setup):
+        """Measure should be created in research/measures/."""
+        from yurtle_kanban.models import WorkItemType
+
+        service = multiboard_hdd_setup["service"]
+
+        item = service.create_item(
+            item_type=WorkItemType.MEASURE,
+            title="Reasoning Accuracy",
+            item_id="M-001",
+        )
+
+        assert "research/measures/" in str(item.file_path)
+
+    def test_idea_routes_to_research(self, multiboard_hdd_setup):
+        """Idea should be created in research/ideas/."""
+        from yurtle_kanban.models import WorkItemType
+
+        service = multiboard_hdd_setup["service"]
+
+        item = service.create_item(
+            item_type=WorkItemType.IDEA,
+            title="Explore transfer learning",
+            item_id="IDEA-R-001",
+        )
+
+        assert "research/ideas/" in str(item.file_path)
+
+    def test_expedition_still_routes_to_kanban_work(self, multiboard_hdd_setup):
+        """Nautical types should still route to kanban-work/, not research/."""
+        from yurtle_kanban.models import WorkItemType
+
+        service = multiboard_hdd_setup["service"]
+
+        item = service.create_item(
+            item_type=WorkItemType.EXPEDITION,
+            title="Test expedition",
+            item_id="EXP-999",
+        )
+
+        assert "kanban-work" in str(item.file_path)
+        assert "research" not in str(item.file_path)

@@ -499,21 +499,39 @@ class KanbanService:
 
         return sorted(items, key=lambda i: (-i.priority_score, i.id))
 
-    def _get_type_directory(self, item_type: WorkItemType) -> Path:
+    def _get_type_directory(self, item_type: WorkItemType, board_name: str | None = None) -> Path:
         """Get the directory for placing a file of this item type.
 
         Resolution order:
         1. Theme item_types[type].path (explicit per-type directory)
+           In multi-board mode, searches all boards' themes for the type.
         2. PathConfig attributes (features, bugs, epics, tasks)
         3. scan_paths keyword match (e.g., "expeditions/" for expedition type)
         4. Fall back to paths.root
         """
         # Priority 1: Theme-defined path
-        theme = self.config.get_theme()
-        if theme and "item_types" in theme:
-            type_def = theme["item_types"].get(item_type.value, {})
-            if "path" in type_def:
-                return self.repo_root / type_def["path"]
+        if self.config.is_multi_board:
+            # Multi-board: check specific board or search all boards
+            if board_name:
+                theme = self.config.get_theme(board_name)
+                if theme and "item_types" in theme:
+                    type_def = theme["item_types"].get(item_type.value, {})
+                    if "path" in type_def:
+                        return self.repo_root / type_def["path"]
+            else:
+                # Search all boards for a theme that defines this item type
+                for board in self.config.boards:
+                    board_theme = board.get_theme(self.repo_root)
+                    if board_theme and "item_types" in board_theme:
+                        type_def = board_theme["item_types"].get(item_type.value, {})
+                        if "path" in type_def:
+                            return self.repo_root / type_def["path"]
+        else:
+            theme = self.config.get_theme()
+            if theme and "item_types" in theme:
+                type_def = theme["item_types"].get(item_type.value, {})
+                if "path" in type_def:
+                    return self.repo_root / type_def["path"]
 
         # Priority 2: Legacy PathConfig attributes (features, bugs, epics, tasks)
         type_path = getattr(self.config.paths, item_type.value + "s", None)
