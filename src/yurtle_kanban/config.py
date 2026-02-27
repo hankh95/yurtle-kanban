@@ -30,18 +30,11 @@ def _load_builtin_theme(theme_name: str, repo_root: Path | None = None) -> dict[
         search_paths.append(repo_root / ".kanban" / "themes" / f"{theme_name}.yaml")
     search_paths.append(Path.cwd() / ".kanban" / "themes" / f"{theme_name}.yaml")
 
-    # Priority 2: Package share directory (pip installed)
-    try:
-        import sys
+    # Priority 2: sys.prefix share directory (pip installed via Hatchling)
+    import sys
 
-        for path in sys.path:
-            share_path = (
-                Path(path).parent / "share" / "yurtle-kanban" / "themes" / f"{theme_name}.yaml"
-            )
-            if share_path.exists():
-                search_paths.append(share_path)
-    except Exception:
-        pass
+    share_path = Path(sys.prefix) / "share" / "yurtle-kanban" / "themes" / f"{theme_name}.yaml"
+    search_paths.append(share_path)
 
     # Priority 3: Source directory (development)
     try:
