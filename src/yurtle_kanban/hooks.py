@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import yaml
 
@@ -111,10 +111,23 @@ class HookEngine:
     graph queries by santiago-bosun.
     """
 
+    _MAX_HOOK_DEPTH = 3
+
     def __init__(self, config_path: Path | None = None):
         self._hooks_config: dict[str, list[dict]] = {}
+        self._callbacks: dict[str, Callable] = {}
+        self._depth: int = 0
         if config_path and config_path.exists():
             self._load_config(config_path)
+
+    def set_callback(self, name: str, fn: Callable) -> None:
+        """Register a callback for actions that need service access.
+
+        Args:
+            name: Callback name (e.g., "create_item").
+            fn: Callable to invoke when the action fires.
+        """
+        self._callbacks[name] = fn
 
     @property
     def is_configured(self) -> bool:
@@ -134,21 +147,37 @@ class HookEngine:
             logger.warning(f"Failed to load hooks config from {path}: {e}")
 
     def trigger(self, event: HookEvent, context: HookContext) -> None:
-        """Execute all hooks matching this event and context."""
+        """Execute all hooks matching this event and context.
+
+        Includes a recursion guard: if hook actions trigger further events
+        (e.g., create_item fires on_create), depth is tracked and execution
+        stops at ``_MAX_HOOK_DEPTH`` to prevent infinite loops.
+        """
         if not self._hooks_config:
             return
 
-        matched = self._matching_hooks(event, context)
-        for hook_def in matched:
-            actions = hook_def.get("actions", [])
-            for action in actions:
-                try:
-                    _execute_action(action, context)
-                except Exception as e:
-                    logger.warning(
-                        f"Hook action {action.get('type', '?')} failed "
-                        f"for {context.item_id}: {e}"
-                    )
+        if self._depth >= self._MAX_HOOK_DEPTH:
+            logger.warning(
+                f"Hook depth limit ({self._MAX_HOOK_DEPTH}) reached "
+                f"— skipping {event.value} for {context.item_id}"
+            )
+            return
+
+        self._depth += 1
+        try:
+            matched = self._matching_hooks(event, context)
+            for hook_def in matched:
+                actions = hook_def.get("actions", [])
+                for action in actions:
+                    try:
+                        _execute_action(action, context, self._callbacks)
+                    except Exception as e:
+                        logger.warning(
+                            f"Hook action {action.get('type', '?')} failed "
+                            f"for {context.item_id}: {e}"
+                        )
+        finally:
+            self._depth -= 1
 
     def _matching_hooks(
         self, event: HookEvent, context: HookContext
@@ -180,7 +209,9 @@ class HookEngine:
 # ─── Actions ───────────────────────────────────────────────────────────────
 
 
-def _execute_action(action: dict, context: HookContext) -> None:
+def _execute_action(
+    action: dict, context: HookContext, callbacks: dict[str, Callable] | None = None
+) -> None:
     """Dispatch to the appropriate action handler."""
     action_type = action.get("type", "")
 
@@ -190,6 +221,10 @@ def _execute_action(action: dict, context: HookContext) -> None:
         _action_log(action, context)
     elif action_type == "shell":
         _action_shell(action, context)
+    elif action_type == "create_item":
+        _action_create_item(action, context, callbacks or {})
+    elif action_type == "notify":
+        _action_notify(action, context)
     else:
         logger.warning(f"Unknown action type: {action_type}")
 
@@ -276,6 +311,77 @@ def _action_shell(action: dict, context: HookContext) -> None:
         logger.warning(f"shell action timed out after {timeout}s: {command[:80]}")
     except Exception as e:
         logger.warning(f"shell action failed: {e}")
+
+
+def _action_create_item(
+    action: dict, context: HookContext, callbacks: dict[str, Callable]
+) -> None:
+    """Create a new kanban item via the registered service callback.
+
+    Requires a ``create_item`` callback registered via
+    ``HookEngine.set_callback("create_item", fn)``.  The callback
+    receives ``item_type``, ``title``, ``priority``, and ``tags``.
+    """
+    callback = callbacks.get("create_item")
+    if not callback:
+        logger.debug("create_item action skipped — no callback registered")
+        return
+
+    item_type = context.render_template(action.get("item_type", "chore"))
+    title = context.render_template(action.get("title", f"Auto: {context.item_id}"))
+    priority = action.get("priority", "medium")
+    tags = action.get("tags", [])
+
+    try:
+        result = callback(
+            item_type=item_type,
+            title=title,
+            priority=priority,
+            tags=tags,
+        )
+        if result:
+            logger.debug(f"create_item action created: {result.get('item_id', '?')}")
+        else:
+            logger.debug("create_item action returned no result")
+    except Exception as e:
+        logger.warning(f"create_item action failed: {e}")
+
+
+def _action_notify(action: dict, context: HookContext) -> None:
+    """Send a human-readable notification to a NATS channel.
+
+    Uses the noesis-ship wire protocol format (type, group, from, message).
+    Publishes to ``ship.channel.{channel}`` via the ``nats`` CLI.
+    """
+    channel = action.get("channel", "bosun")
+    channel = context.render_template(channel)
+    message = action.get("message", f"{context.item_id}: {context.title}")
+    message = context.render_template(message)
+
+    subject = f"ship.channel.{channel}"
+    payload = json.dumps({
+        "type": "channel_message",
+        "group": channel,
+        "from": "kanban-hooks",
+        "fromId": "yurtle-kanban",
+        "message": message,
+        "timestamp": context.timestamp,
+    })
+
+    try:
+        subprocess.run(
+            ["nats", "pub", subject, payload],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        logger.debug(f"Notified {subject}: {message[:80]}")
+    except FileNotFoundError:
+        logger.debug("nats CLI not found — skipping notify")
+    except subprocess.TimeoutExpired:
+        logger.warning(f"notify timed out for {subject}")
+    except Exception as e:
+        logger.warning(f"notify action failed: {e}")
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────

@@ -44,6 +44,7 @@ class KanbanService:
         self._hook_engine = HookEngine(
             hooks_config or (repo_root / ".kanban" / "hooks" / "kanban-hooks.yurtle.md")
         )
+        self._hook_engine.set_callback("create_item", self._hook_create_item)
 
     def scan(self) -> list[WorkItem]:
         """Scan configured paths for work items."""
@@ -1103,6 +1104,34 @@ class KanbanService:
             ),
         )
 
+        # Fire ASSIGNED hook when an assignee is set
+        if assignee:
+            self._hook_engine.trigger(
+                HookEvent.ASSIGNED,
+                HookContext(
+                    event=HookEvent.ASSIGNED,
+                    item_id=item.id,
+                    item_type=item.item_type.value,
+                    title=item.title,
+                    new_status=new_status.value,
+                    assignee=assignee,
+                ),
+            )
+
+        # Fire BLOCKED hook when item moves to blocked status
+        if new_status.value == "blocked":
+            self._hook_engine.trigger(
+                HookEvent.BLOCKED,
+                HookContext(
+                    event=HookEvent.BLOCKED,
+                    item_id=item.id,
+                    item_type=item.item_type.value,
+                    title=item.title,
+                    new_status="blocked",
+                    assignee=item.assignee,
+                ),
+            )
+
         return item
 
     def _fire_create_hook(self, item: WorkItem) -> None:
@@ -1118,6 +1147,31 @@ class KanbanService:
                 assignee=item.assignee,
             ),
         )
+
+    def _hook_create_item(
+        self,
+        item_type: str,
+        title: str,
+        priority: str = "medium",
+        tags: list[str] | None = None,
+    ) -> dict[str, str] | None:
+        """Callback for the hook ``create_item`` action.
+
+        Creates a work item without pushing.  Returns a dict with
+        ``item_id`` and ``file_path`` on success, or None on failure.
+        """
+        try:
+            wit = WorkItemType.from_string(item_type)
+            item = self.create_item(
+                item_type=wit,
+                title=title,
+                priority=priority,
+                tags=tags or [],
+            )
+            return {"item_id": item.id, "file_path": str(item.file_path)}
+        except Exception as e:
+            logger.warning(f"Hook create_item failed: {e}")
+            return None
 
     def _validate_transition(self, item: WorkItem, new_status: WorkItemStatus) -> tuple[bool, str]:
         """Validate a status transition using workflow rules if available.
