@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shlex
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -60,10 +61,15 @@ class HookContext:
     assignee: Optional[str] = None
     forced: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    timestamp: str = field(default="", init=False)
+
+    def __post_init__(self) -> None:
+        self.timestamp = datetime.now(timezone.utc).isoformat()
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-compatible dict."""
         return {
+            **self.metadata,
             "event": self.event.value,
             "item_id": self.item_id,
             "item_type": self.item_type,
@@ -72,8 +78,7 @@ class HookContext:
             "new_status": self.new_status,
             "assignee": self.assignee,
             "forced": self.forced,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            **self.metadata,
+            "timestamp": self.timestamp,
         }
 
     def render_template(self, template: str) -> str:
@@ -86,7 +91,7 @@ class HookContext:
             "old_status": self.old_status or "",
             "new_status": self.new_status or "",
             "assignee": self.assignee or "",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": self.timestamp,
             "context": json.dumps(self.to_dict()),
         }
         result = template
@@ -227,12 +232,29 @@ def _action_log(action: dict, context: HookContext) -> None:
 
 
 def _action_shell(action: dict, context: HookContext) -> None:
-    """Run a shell command with template variable substitution."""
+    """Run a shell command with template variable substitution.
+
+    Template values are escaped with shlex.quote() to prevent injection
+    via item titles or other user-controlled context fields.
+    """
     command = action.get("command", "")
     if not command:
         return
 
-    command = context.render_template(command)
+    # Use shlex.quote() on all substituted values to prevent injection
+    safe_replacements = {
+        "item_id": shlex.quote(context.item_id),
+        "item_type": shlex.quote(context.item_type),
+        "title": shlex.quote(context.title),
+        "event": shlex.quote(context.event.value),
+        "old_status": shlex.quote(context.old_status or ""),
+        "new_status": shlex.quote(context.new_status or ""),
+        "assignee": shlex.quote(context.assignee or ""),
+        "timestamp": shlex.quote(context.timestamp),
+        "context": shlex.quote(json.dumps(context.to_dict())),
+    }
+    for key, value in safe_replacements.items():
+        command = command.replace(f"{{{key}}}", value)
     timeout = action.get("timeout", 30)
 
     try:

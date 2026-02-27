@@ -1114,7 +1114,7 @@ class KanbanService:
                 item_id=item.id,
                 item_type=item.item_type.value,
                 title=item.title,
-                new_status=WorkItemStatus.BACKLOG.value,
+                new_status=item.status.value,
                 assignee=item.assignee,
             ),
         )
