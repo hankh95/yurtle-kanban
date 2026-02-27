@@ -49,6 +49,12 @@ class WorkItemType(Enum):
     HAZARD = "hazard"
     SIGNAL = "signal"
     CHORE = "chore"
+    # HDD (Hypothesis-Driven Development) theme
+    LITERATURE = "literature"
+    PAPER = "paper"
+    HYPOTHESIS = "hypothesis"
+    EXPERIMENT = "experiment"
+    MEASURE = "measure"
 
     @classmethod
     def from_string(cls, value: str) -> "WorkItemType":
