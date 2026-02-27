@@ -31,6 +31,7 @@ except ImportError:
     pass  # yurtle_rdflib is optional; YAML frontmatter still works without it
 
 from yurtle_kanban.config import KanbanConfig
+from yurtle_kanban.hooks import HookContext, HookEngine, HookEvent
 from yurtle_kanban.models import (
     Board,
     Column,
@@ -51,6 +52,10 @@ from yurtle_kanban.workflow import (
 __all__ = [
     # Config
     "KanbanConfig",
+    # Hooks
+    "HookContext",
+    "HookEngine",
+    "HookEvent",
     # Models
     "Board",
     "Column",
