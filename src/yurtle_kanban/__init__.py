@@ -21,7 +21,7 @@ Usage:
     yurtle-kanban-mcp
 """
 
-__version__ = "0.1.0"
+__version__ = "1.11.0"
 
 # Register yurtle_rdflib plugin with rdflib (enables format="yurtle" parsing)
 # This must be imported before any rdflib Graph.parse() calls with format="yurtle"
