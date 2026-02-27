@@ -1157,8 +1157,13 @@ class KanbanService:
     ) -> dict[str, str] | None:
         """Callback for the hook ``create_item`` action.
 
-        Creates a work item without pushing.  Returns a dict with
-        ``item_id`` and ``file_path`` on success, or None on failure.
+        Creates a work item **locally only** (no git commit or push).
+        This is intentional: hooks must be lightweight and side-effect-safe.
+        The calling service (e.g., Bosun) is responsible for pushing if
+        the item needs to reach the remote repo.
+
+        Returns a dict with ``item_id`` and ``file_path`` on success,
+        or ``None`` on failure.
         """
         try:
             wit = WorkItemType.from_string(item_type)
