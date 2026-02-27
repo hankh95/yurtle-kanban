@@ -11,8 +11,10 @@ from yurtle_kanban.hooks import (
     HookContext,
     HookEngine,
     HookEvent,
+    _action_create_item,
     _action_log,
     _action_nats_publish,
+    _action_notify,
     _action_shell,
     _execute_action,
     _extract_frontmatter,
@@ -497,3 +499,271 @@ class TestHookEngineTrigger:
         """Hook action failures are swallowed — kanban op must succeed."""
         engine.trigger(HookEvent.ITEM_CREATED, idea_context)
         # No exception raised
+
+
+# ─── Create Item Action ──────────────────────────────────────────────────
+
+
+class TestCreateItemAction:
+    def test_calls_callback(self, idea_context):
+        mock_cb = MagicMock(return_value={"item_id": "CHORE-099", "file_path": "/tmp/c.md"})
+        action = {
+            "type": "create_item",
+            "item_type": "chore",
+            "title": "Auto: {item_id}",
+            "priority": "high",
+            "tags": ["auto-created"],
+        }
+        _action_create_item(action, idea_context, {"create_item": mock_cb})
+
+        mock_cb.assert_called_once_with(
+            item_type="chore",
+            title="Auto: IDEA-R-011",
+            priority="high",
+            tags=["auto-created"],
+        )
+
+    def test_renders_templates(self, idea_context):
+        mock_cb = MagicMock(return_value={"item_id": "CHORE-100"})
+        action = {
+            "type": "create_item",
+            "item_type": "chore",
+            "title": "Remediate stale: {item_id} - {title}",
+        }
+        _action_create_item(action, idea_context, {"create_item": mock_cb})
+
+        call_kwargs = mock_cb.call_args[1]
+        assert call_kwargs["title"] == "Remediate stale: IDEA-R-011 - Test Research Question"
+
+    def test_missing_callback_no_crash(self, idea_context):
+        action = {"type": "create_item", "item_type": "chore", "title": "Test"}
+        _action_create_item(action, idea_context, {})  # No crash
+
+    def test_callback_failure_no_crash(self, idea_context):
+        mock_cb = MagicMock(side_effect=RuntimeError("DB error"))
+        action = {"type": "create_item", "item_type": "chore", "title": "Test"}
+        _action_create_item(action, idea_context, {"create_item": mock_cb})  # No crash
+
+    def test_default_priority(self, idea_context):
+        mock_cb = MagicMock(return_value={"item_id": "CHORE-101"})
+        action = {"type": "create_item", "item_type": "chore", "title": "Test"}
+        _action_create_item(action, idea_context, {"create_item": mock_cb})
+
+        call_kwargs = mock_cb.call_args[1]
+        assert call_kwargs["priority"] == "medium"
+
+    def test_with_tags(self, idea_context):
+        mock_cb = MagicMock(return_value={"item_id": "CHORE-102"})
+        action = {
+            "type": "create_item",
+            "item_type": "chore",
+            "title": "Test",
+            "tags": ["stale", "auto"],
+        }
+        _action_create_item(action, idea_context, {"create_item": mock_cb})
+
+        call_kwargs = mock_cb.call_args[1]
+        assert call_kwargs["tags"] == ["stale", "auto"]
+
+    def test_callback_returns_none(self, idea_context):
+        mock_cb = MagicMock(return_value=None)
+        action = {"type": "create_item", "item_type": "chore", "title": "Test"}
+        _action_create_item(action, idea_context, {"create_item": mock_cb})  # No crash
+
+    def test_execute_action_dispatches_create_item(self, idea_context):
+        mock_cb = MagicMock(return_value={"item_id": "CHORE-103"})
+        action = {"type": "create_item", "item_type": "chore", "title": "Test"}
+        _execute_action(action, idea_context, {"create_item": mock_cb})
+        mock_cb.assert_called_once()
+
+
+# ─── Notify Action ───────────────────────────────────────────────────────
+
+
+class TestNotifyAction:
+    @patch("yurtle_kanban.hooks.subprocess.run")
+    def test_publishes_to_channel_subject(self, mock_run, idea_context):
+        action = {
+            "type": "notify",
+            "channel": "bosun",
+            "message": "{item_id} created",
+        }
+        _action_notify(action, idea_context)
+
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert args[0] == "nats"
+        assert args[1] == "pub"
+        assert args[2] == "ship.channel.bosun"
+
+    @patch("yurtle_kanban.hooks.subprocess.run")
+    def test_renders_template_message(self, mock_run, idea_context):
+        action = {
+            "type": "notify",
+            "channel": "bosun",
+            "message": "{item_id} blocked: {title}",
+        }
+        _action_notify(action, idea_context)
+
+        payload = json.loads(mock_run.call_args[0][0][3])
+        assert payload["message"] == "IDEA-R-011 blocked: Test Research Question"
+
+    @patch("yurtle_kanban.hooks.subprocess.run")
+    def test_wire_protocol_format(self, mock_run, idea_context):
+        action = {"type": "notify", "channel": "bosun", "message": "test"}
+        _action_notify(action, idea_context)
+
+        payload = json.loads(mock_run.call_args[0][0][3])
+        assert payload["type"] == "channel_message"
+        assert payload["group"] == "bosun"
+        assert payload["from"] == "kanban-hooks"
+        assert payload["fromId"] == "yurtle-kanban"
+        assert "timestamp" in payload
+        assert "message" in payload
+
+    @patch(
+        "yurtle_kanban.hooks.subprocess.run",
+        side_effect=FileNotFoundError("nats not found"),
+    )
+    def test_missing_nats_cli_no_crash(self, mock_run, idea_context):
+        action = {"type": "notify", "channel": "bosun", "message": "test"}
+        _action_notify(action, idea_context)  # No crash
+
+    @patch(
+        "yurtle_kanban.hooks.subprocess.run",
+        side_effect=subprocess.TimeoutExpired("nats", 10),
+    )
+    def test_timeout_no_crash(self, mock_run, idea_context):
+        action = {"type": "notify", "channel": "bosun", "message": "test"}
+        _action_notify(action, idea_context)  # No crash
+
+    @patch("yurtle_kanban.hooks.subprocess.run")
+    def test_template_channel(self, mock_run, expedition_move_context):
+        action = {
+            "type": "notify",
+            "channel": "{assignee}",
+            "message": "You got {item_id}",
+        }
+        _action_notify(action, expedition_move_context)
+
+        args = mock_run.call_args[0][0]
+        assert args[2] == "ship.channel.M5"
+
+    def test_execute_action_dispatches_notify(self, idea_context):
+        with patch("yurtle_kanban.hooks.subprocess.run") as mock_run:
+            action = {"type": "notify", "channel": "bosun", "message": "test"}
+            _execute_action(action, idea_context)
+            mock_run.assert_called_once()
+
+
+# ─── Recursion Guard ─────────────────────────────────────────────────────
+
+
+class TestRecursionGuard:
+    def test_depth_starts_at_zero(self):
+        engine = HookEngine(None)
+        assert engine._depth == 0
+
+    def test_depth_resets_after_trigger(self, engine, idea_context):
+        engine.trigger(HookEvent.ITEM_CREATED, idea_context)
+        assert engine._depth == 0
+
+    def test_depth_resets_after_exception(self, engine, idea_context):
+        """Depth resets even when an action raises."""
+        with patch(
+            "yurtle_kanban.hooks._execute_action",
+            side_effect=RuntimeError("boom"),
+        ):
+            engine.trigger(HookEvent.ITEM_CREATED, idea_context)
+        assert engine._depth == 0
+
+    def test_stops_at_max_depth(self):
+        """Trigger at max depth is a no-op."""
+        engine = HookEngine(None)
+        engine._hooks_config = {
+            "on_create": [{"actions": [{"type": "log"}]}],
+        }
+        engine._depth = HookEngine._MAX_HOOK_DEPTH
+
+        ctx = HookContext(
+            event=HookEvent.ITEM_CREATED,
+            item_id="EXP-001",
+            item_type="expedition",
+            title="Test",
+        )
+        # Should not execute (at depth limit)
+        with patch("yurtle_kanban.hooks._execute_action") as mock_exec:
+            engine.trigger(HookEvent.ITEM_CREATED, ctx)
+            mock_exec.assert_not_called()
+
+        # Depth unchanged (wasn't incremented since we hit the guard)
+        assert engine._depth == HookEngine._MAX_HOOK_DEPTH
+
+    def test_nested_trigger_increments_depth(self):
+        """Simulates create_item action that triggers on_create inside trigger."""
+        engine = HookEngine(None)
+        engine._hooks_config = {
+            "on_create": [{"actions": [{"type": "log"}]}],
+        }
+        depths_seen = []
+
+        original_exec = _execute_action
+
+        def tracking_exec(action, context, callbacks=None):
+            depths_seen.append(engine._depth)
+            # Simulate a nested trigger (like create_item would do)
+            if engine._depth == 1:
+                inner_ctx = HookContext(
+                    event=HookEvent.ITEM_CREATED,
+                    item_id="AUTO-001",
+                    item_type="chore",
+                    title="Nested",
+                )
+                engine.trigger(HookEvent.ITEM_CREATED, inner_ctx)
+
+        with patch("yurtle_kanban.hooks._execute_action", side_effect=tracking_exec):
+            ctx = HookContext(
+                event=HookEvent.ITEM_CREATED,
+                item_id="EXP-001",
+                item_type="expedition",
+                title="Test",
+            )
+            engine.trigger(HookEvent.ITEM_CREATED, ctx)
+
+        # First call at depth 1, nested at depth 2
+        assert depths_seen == [1, 2]
+        assert engine._depth == 0
+
+
+# ─── Callback Registration ───────────────────────────────────────────────
+
+
+class TestCallbackRegistration:
+    def test_set_callback(self):
+        engine = HookEngine(None)
+        fn = MagicMock()
+        engine.set_callback("create_item", fn)
+        assert engine._callbacks["create_item"] is fn
+
+    def test_callback_passed_to_execute_action(self, hooks_file, idea_context):
+        engine = HookEngine(hooks_file)
+        mock_cb = MagicMock(return_value={"item_id": "CHORE-050"})
+        engine.set_callback("create_item", mock_cb)
+
+        # Add a create_item action to on_create
+        engine._hooks_config["on_create"].append({
+            "item_types": ["idea"],
+            "actions": [
+                {
+                    "type": "create_item",
+                    "item_type": "chore",
+                    "title": "Auto from {item_id}",
+                }
+            ],
+        })
+
+        with patch("yurtle_kanban.hooks.subprocess.run"):
+            engine.trigger(HookEvent.ITEM_CREATED, idea_context)
+
+        mock_cb.assert_called_once()
+        assert mock_cb.call_args[1]["title"] == "Auto from IDEA-R-011"
