@@ -4,7 +4,27 @@ import yaml
 from pathlib import Path
 from click.testing import CliRunner
 
-from yurtle_kanban.cli import main
+from yurtle_kanban.cli import main, _get_templates_dir, _get_skills_dir
+
+
+class TestSharedDataResolution:
+    """_get_templates_dir() and _get_skills_dir() should find shared data (#19)."""
+
+    def test_get_templates_dir_finds_templates(self):
+        """Templates dir should exist and contain expected theme subdirs."""
+        templates_dir = _get_templates_dir()
+        assert templates_dir.exists(), f"templates dir not found: {templates_dir}"
+        # Should contain at least the standard themes
+        for theme in ("hdd", "nautical", "software"):
+            assert (templates_dir / theme).is_dir(), f"Missing theme subdir: {theme}"
+
+    def test_get_skills_dir_finds_skills(self):
+        """Skills dir should exist and contain expected theme subdirs."""
+        skills_dir = _get_skills_dir()
+        assert skills_dir.exists(), f"skills dir not found: {skills_dir}"
+        # Should contain at least the standard themes
+        for theme in ("hdd", "nautical", "software"):
+            assert (skills_dir / theme).is_dir(), f"Missing theme subdir: {theme}"
 
 
 class TestInitScaffolding:
