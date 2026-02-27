@@ -50,11 +50,10 @@ def _get_shared_data_dir(subdir: str) -> Path:
     """
     import sys
 
-    # Priority 1: Package share directory (pip installed via Hatchling)
-    for path in sys.path:
-        share_path = Path(path).parent / "share" / "yurtle-kanban" / subdir
-        if share_path.exists():
-            return share_path
+    # Priority 1: sys.prefix (standard for venv/conda — Hatchling installs here)
+    share_path = Path(sys.prefix) / "share" / "yurtle-kanban" / subdir
+    if share_path.exists():
+        return share_path
 
     # Priority 2: Development source repo (subdir at repo root)
     try:
@@ -226,9 +225,22 @@ kanban:
         skills_dst = repo_root / ".claude" / "skills"
         skills_dst.mkdir(parents=True, exist_ok=True)
 
-        # Copy theme-neutral skills (sync, status, release)
+        # Theme directories contain sub-skills (e.g., nautical/expedition/SKILL.md).
+        # Detect theme dirs and their owned skills to avoid copying theme-specific
+        # skills as theme-neutral (can happen with stale pip installs).
+        theme_dirs: set[str] = set()
+        theme_owned_skills: set[str] = set()
+        for d in skills_src.iterdir():
+            if d.is_dir() and any(sub.is_dir() for sub in d.iterdir()):
+                theme_dirs.add(d.name)
+                for sub in d.iterdir():
+                    if sub.is_dir():
+                        theme_owned_skills.add(sub.name)
+        skip = theme_dirs | theme_owned_skills
+
+        # Copy theme-neutral skills (sync, status, release, etc.)
         for skill_dir in skills_src.iterdir():
-            if skill_dir.is_dir() and skill_dir.name not in ("nautical", "software"):
+            if skill_dir.is_dir() and skill_dir.name not in skip:
                 dst = skills_dst / skill_dir.name
                 if dst.exists():
                     shutil.rmtree(dst)
