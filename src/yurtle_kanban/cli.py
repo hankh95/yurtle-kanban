@@ -36,6 +36,7 @@ from .board import (
 from .config import KanbanConfig
 from .export import export_expedition_index, export_html, export_json, export_markdown
 from .models import WorkItemStatus, WorkItemType
+from .hdd_commands import experiment, hypothesis, idea, literature, measure, paper
 from .service import KanbanService
 
 
@@ -133,6 +134,12 @@ _TEMPLATE_SECTIONS: dict[str, list[str]] = {
     "chore": ["Description"],
     "hazard": ["Description", "Impact", "Mitigation"],
     "signal": ["Observation", "Potential Value"],
+    # HDD theme
+    "literature": ["Topic", "Search Strategy", "Key Findings", "Gaps", "References"],
+    "paper": ["Abstract", "Introduction", "Methodology", "Results", "Conclusion"],
+    "hypothesis": ["Hypothesis Statement", "Target", "Rationale", "Testable Predictions"],
+    "experiment": ["Purpose", "Method", "Results", "Conclusion"],
+    "measure": ["Description", "Specification", "Collection Method"],
 }
 
 
@@ -1088,6 +1095,15 @@ def validate(fix: bool, as_json: bool):
         console.print("[dim]Run with --fix to attempt automatic fixes[/dim]")
 
     sys.exit(1)
+
+
+# HDD (Hypothesis-Driven Development) subgroups
+main.add_command(idea)
+main.add_command(literature)
+main.add_command(paper)
+main.add_command(hypothesis)
+main.add_command(experiment)
+main.add_command(measure)
 
 
 if __name__ == "__main__":

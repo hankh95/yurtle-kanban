@@ -216,6 +216,12 @@ class KanbanService:
 
     def _map_theme_type(self, type_str: str) -> WorkItemType | None:
         """Map theme-specific type to standard type."""
+        # First try direct enum match (handles HDD types that are in the enum)
+        try:
+            return WorkItemType.from_string(type_str)
+        except ValueError:
+            pass
+
         theme = self.config.get_theme()
         if theme and "item_types" in theme:
             for type_id, type_def in theme["item_types"].items():
@@ -539,12 +545,23 @@ class KanbanService:
         assignee: str | None = None,
         description: str | None = None,
         tags: list[str] | None = None,
+        content: str | None = None,
+        item_id: str | None = None,
     ) -> WorkItem:
-        """Create a new work item."""
-        # Generate ID
-        prefix = self._get_type_prefix(item_type)
-        next_num = self._get_next_id_number(prefix)
-        item_id = f"{prefix}-{next_num:03d}"
+        """Create a new work item.
+
+        Args:
+            content: Pre-rendered file content (e.g., from TemplateEngine).
+                     When provided, writes this instead of item.to_markdown().
+            item_id: Explicit ID to use instead of auto-allocating.
+                     Useful for HDD types with non-standard ID formats
+                     (e.g., H130.1, EXPR-130, PAPER-130).
+        """
+        # Generate or use provided ID
+        if item_id is None:
+            prefix = self._get_type_prefix(item_type)
+            next_num = self._get_next_id_number(prefix)
+            item_id = f"{prefix}-{next_num:03d}"
 
         # Determine file path
         if path is None:
@@ -570,8 +587,11 @@ class KanbanService:
             tags=tags or [],
         )
 
-        # Write file
-        path.write_text(item.to_markdown())
+        # Write file — use pre-rendered content if provided
+        if content is not None:
+            path.write_text(content)
+        else:
+            path.write_text(item.to_markdown())
 
         # Add to cache
         self._items[item_id] = item
@@ -603,6 +623,8 @@ class KanbanService:
         description: str | None = None,
         tags: list[str] | None = None,
         max_retries: int = 3,
+        content: str | None = None,
+        item_id: str | None = None,
     ) -> dict[str, Any]:
         """Atomically create a work item, commit, and push to remote.
 
@@ -617,12 +639,16 @@ class KanbanService:
         If no remote is configured, gracefully degrades to local
         allocate + create + commit (no push, no retry needed).
 
+        Args:
+            content: Pre-rendered file content (e.g., from TemplateEngine).
+            item_id: Explicit ID (bypasses auto-allocation). For HDD types
+                     with non-standard formats (H130.1, EXPR-130, PAPER-130).
+
         Returns:
             dict with 'success', 'item', 'id', 'pushed', and 'message' keys
         """
         import json as json_mod
 
-        prefix = self._get_type_prefix(item_type)
         has_remote = self._has_remote()
         attempts = max_retries if has_remote else 1
 
@@ -644,19 +670,23 @@ class KanbanService:
             self._items.clear()
             self.scan()
 
-            # Step 3: Allocate ID
-            next_num = self._get_next_id_number(prefix)
-            item_id = f"{prefix}-{next_num:03d}"
+            # Step 3: Allocate ID (or use provided)
+            if item_id is not None:
+                current_id = item_id
+            else:
+                prefix = self._get_type_prefix(item_type)
+                next_num = self._get_next_id_number(prefix)
+                current_id = f"{prefix}-{next_num:03d}"
 
             # Step 4: Create the file
             type_dir = self._get_type_directory(item_type)
             slug = self._slugify(title)
-            filename = f"{item_id}-{slug}.md" if slug else f"{item_id}.md"
+            filename = f"{current_id}-{slug}.md" if slug else f"{current_id}.md"
             file_path = type_dir / filename
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
             item = WorkItem(
-                id=item_id,
+                id=current_id,
                 title=title,
                 item_type=item_type,
                 status=WorkItemStatus.BACKLOG,
@@ -667,7 +697,10 @@ class KanbanService:
                 description=description,
                 tags=tags or [],
             )
-            file_path.write_text(item.to_markdown())
+            if content is not None:
+                file_path.write_text(content)
+            else:
+                file_path.write_text(item.to_markdown())
 
             # Step 5: Update _ID_ALLOCATIONS.json
             lock_file = self.repo_root / ".kanban" / "_ID_ALLOCATIONS.json"
@@ -680,11 +713,16 @@ class KanbanService:
                 except Exception:
                     allocations = []
 
+            alloc_prefix = self._get_type_prefix(item_type)
+            # Extract trailing number for allocation record
+            num_match = re.search(r"(\d+)$", current_id)
+            alloc_num = int(num_match.group(1)) if num_match else 0
+
             allocations.append(
                 {
-                    "id": item_id,
-                    "prefix": prefix,
-                    "number": next_num,
+                    "id": current_id,
+                    "prefix": alloc_prefix,
+                    "number": alloc_num,
                     "allocated_at": datetime.now().isoformat(),
                     "allocated_by": self._get_git_user(),
                 }
@@ -701,7 +739,7 @@ class KanbanService:
                     check=True,
                 )
                 subprocess.run(
-                    ["git", "commit", "-m", f"Create {item_id}: {title}"],
+                    ["git", "commit", "-m", f"Create {current_id}: {title}"],
                     cwd=self.repo_root,
                     capture_output=True,
                     check=True,
@@ -718,14 +756,14 @@ class KanbanService:
 
             # Step 7: Push (only if remote exists)
             if not has_remote:
-                self._items[item_id] = item
+                self._items[current_id] = item
                 self._fire_create_hook(item)
                 return {
                     "success": True,
                     "item": item,
-                    "id": item_id,
+                    "id": current_id,
                     "pushed": False,
-                    "message": f"Created and committed {item_id}: {title} (no remote configured)",
+                    "message": f"Created and committed {current_id}: {title} (no remote configured)",
                 }
 
             push_result = subprocess.run(
@@ -737,14 +775,14 @@ class KanbanService:
             )
 
             if push_result.returncode == 0:
-                self._items[item_id] = item
+                self._items[current_id] = item
                 self._fire_create_hook(item)
                 return {
                     "success": True,
                     "item": item,
-                    "id": item_id,
+                    "id": current_id,
                     "pushed": True,
-                    "message": f"Created and pushed {item_id}: {title}",
+                    "message": f"Created and pushed {current_id}: {title}",
                 }
 
             # Push failed — another agent got there first
@@ -790,7 +828,7 @@ class KanbanService:
             for type_id, type_def in theme["item_types"].items():
                 if type_id == item_type.value:
                     return type_def.get("id_prefix", item_type.value[:4].upper())
-        # Default prefixes (software + nautical themes)
+        # Default prefixes (software + nautical + HDD themes)
         prefixes = {
             # Software theme
             WorkItemType.FEATURE: "FEAT",
@@ -806,6 +844,12 @@ class KanbanService:
             WorkItemType.HAZARD: "HAZ",
             WorkItemType.SIGNAL: "SIG",
             WorkItemType.CHORE: "CHORE",
+            # HDD theme
+            WorkItemType.LITERATURE: "LIT",
+            WorkItemType.PAPER: "PAPER",
+            WorkItemType.HYPOTHESIS: "H",
+            WorkItemType.EXPERIMENT: "EXPR",
+            WorkItemType.MEASURE: "M",
         }
         return prefixes.get(item_type, "ITEM")
 
@@ -838,13 +882,13 @@ class KanbanService:
                 pass
 
         # Source 2: Check IDs from parsed items
-        for item_id in self._items.keys():
-            if item_id.startswith(prefix + "-"):
-                try:
-                    num = int(item_id.split("-")[1])
-                    max_num = max(max_num, num)
-                except (ValueError, IndexError):
-                    pass
+        # Use regex to extract trailing number — handles multi-segment prefixes
+        # like IDEA-R-003 where split("-")[1] would give "R" not "003"
+        for existing_id in self._items.keys():
+            if existing_id.startswith(prefix + "-"):
+                match = re.search(r"(\d+)$", existing_id)
+                if match:
+                    max_num = max(max_num, int(match.group(1)))
 
         # Source 3: Scan filenames directly to catch files without frontmatter
         for scan_path in self.config.get_work_paths():
@@ -853,16 +897,35 @@ class KanbanService:
                 for md_file in full_path.rglob("*.md"):
                     filename = md_file.stem  # e.g., "EXP-608-Some-Title"
                     if filename.startswith(prefix + "-"):
-                        try:
-                            # Extract number from filename
-                            parts = filename.split("-")
-                            if len(parts) >= 2:
-                                num = int(parts[1])
-                                max_num = max(max_num, num)
-                        except (ValueError, IndexError):
-                            pass
+                        # Extract the number immediately after the prefix
+                        suffix = filename[len(prefix) + 1:]  # e.g., "608-Some-Title"
+                        match = re.match(r"(\d+)", suffix)
+                        if match:
+                            max_num = max(max_num, int(match.group(1)))
 
         return max_num + 1
+
+    def get_next_hypothesis_number(self, paper_num: str) -> int:
+        """Get next hypothesis number for a paper.
+
+        Scans existing items for H{paper_num}.N patterns and returns max N + 1.
+        E.g., if H130.1 and H130.2 exist, returns 3.
+        """
+        if not self._items:
+            self.scan()
+
+        max_n = 0
+        prefix = f"H{paper_num}."
+
+        for existing_id in self._items.keys():
+            if existing_id.startswith(prefix):
+                suffix = existing_id[len(prefix):]
+                try:
+                    max_n = max(max_n, int(suffix))
+                except ValueError:
+                    pass
+
+        return max_n + 1
 
     def allocate_next_id(
         self,

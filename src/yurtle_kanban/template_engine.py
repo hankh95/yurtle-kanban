@@ -1,0 +1,186 @@
+"""
+Template engine for rendering HDD (and other theme) item templates.
+
+Loads markdown templates from the templates/ directory and substitutes
+variables to produce ready-to-write file content.
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import date
+from pathlib import Path
+
+
+class TemplateEngine:
+    """Load and render themed item templates with variable substitution."""
+
+    def __init__(self, templates_dir: Path):
+        self.templates_dir = templates_dir
+
+    def render(self, theme: str, item_type: str, variables: dict[str, str]) -> str:
+        """Load template and substitute variables.
+
+        Args:
+            theme: Theme name (e.g., "hdd", "software")
+            item_type: Item type (e.g., "hypothesis", "paper")
+            variables: Dict of placeholder → value substitutions.
+                       Common keys: id, title, paper, n, source_idea, unit, category
+
+        Returns:
+            Full markdown file content with variables substituted.
+
+        Raises:
+            FileNotFoundError: If no template exists for this theme/type.
+        """
+        template_path = self._get_template_path(theme, item_type)
+        if template_path is None:
+            raise FileNotFoundError(
+                f"No template found for theme='{theme}', type='{item_type}' "
+                f"(searched {self.templates_dir})"
+            )
+
+        content = template_path.read_text()
+
+        # Always substitute today's date
+        variables.setdefault("date", date.today().isoformat())
+
+        # Substitute YYYY-MM-DD with actual date
+        content = content.replace("YYYY-MM-DD", variables["date"])
+
+        # Substitute frontmatter id field
+        if "id" in variables:
+            # Replace the id line in frontmatter (handles patterns like IDEA-R-XXX, H{paper}.{n}, etc.)
+            content = re.sub(
+                r"^(id:\s*).+$",
+                rf"\g<1>{variables['id']}",
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+
+        # Substitute title in frontmatter and heading
+        if "title" in variables:
+            title = variables["title"]
+            content = re.sub(
+                r'^(title:\s*)".*"',
+                rf'\g<1>"{title}"',
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            # Also replace the first H1 heading with the title
+            content = re.sub(
+                r"^(# ).+$",
+                rf"\g<1>{title}",
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+
+        # Substitute paper reference in frontmatter
+        if "paper" in variables:
+            paper_val = variables["paper"]
+            content = re.sub(
+                r"^(paper:\s*).+$",
+                rf"\g<1>PAPER-{paper_val}",
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            # Replace {paper} placeholders in body
+            content = content.replace("{paper}", paper_val)
+
+        # Substitute hypothesis number
+        if "n" in variables:
+            content = content.replace("{n}", variables["n"])
+
+        # Substitute paper number for paper template
+        if "paper_num" in variables:
+            content = content.replace("{N}", variables["paper_num"])
+
+        # Substitute source_idea
+        if "source_idea" in variables:
+            content = re.sub(
+                r"^(source_idea:\s*).+$",
+                rf"\g<1>{variables['source_idea']}",
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+
+        # Substitute hypothesis reference in experiment template
+        if "hypothesis_id" in variables:
+            content = re.sub(
+                r"^(hypothesis:\s*).+$",
+                rf"\g<1>{variables['hypothesis_id']}",
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+
+        # Substitute unit and category for measures
+        if "unit" in variables:
+            content = re.sub(
+                r'^(unit:\s*)".*"',
+                rf'\g<1>"{variables["unit"]}"',
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            # Also try without quotes
+            content = re.sub(
+                r"^(unit:\s*)$",
+                rf'\g<1>"{variables["unit"]}"',
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+
+        if "category" in variables:
+            content = re.sub(
+                r'^(category:\s*)".*"',
+                rf'\g<1>"{variables["category"]}"',
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            content = re.sub(
+                r"^(category:\s*)$",
+                rf'\g<1>"{variables["category"]}"',
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+
+        # Substitute target for hypothesis
+        if "target" in variables:
+            content = re.sub(
+                r'^(target:\s*)".*"',
+                rf'\g<1>"{variables["target"]}"',
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+
+        # Substitute authors for paper
+        if "authors" in variables:
+            content = re.sub(
+                r"^(authors:\s*)\[\]",
+                rf"\g<1>[{variables['authors']}]",
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+
+        return content
+
+    def _get_template_path(self, theme: str, item_type: str) -> Path | None:
+        """Resolve template file path.
+
+        Looks for templates/{theme}/{item_type}.md
+        """
+        path = self.templates_dir / theme / f"{item_type}.md"
+        if path.exists():
+            return path
+        return None
