@@ -14,8 +14,7 @@ from yurtle_kanban.models import WorkItem, WorkItemStatus, WorkItemType
 from yurtle_kanban.research_interlinks import (
     has_research_items,
     render_research_interlinks,
-    _parse_turtle_blocks,
-    _first_value,
+    _first_triple,
     _obj_id,
     HYP,
     EXPR,
@@ -161,6 +160,30 @@ def _write_measure(repo: Path, measure_id: str, title: str, unit: str, category:
     return file_path
 
 
+def _make_item_with_graph(
+    file_path: Path, item_id: str, title: str,
+    item_type: WorkItemType, status: WorkItemStatus,
+) -> WorkItem:
+    """Build a WorkItem with its graph populated via yurtle-rdflib.
+
+    Mirrors what KanbanService._parse_graph() does: reads the file content
+    and parses it with yurtle_rdflib.parse_yurtle() to get the RDF graph
+    (frontmatter + fenced blocks).
+    """
+    import yurtle_rdflib
+
+    content = file_path.read_text()
+    doc = yurtle_rdflib.parse_yurtle(content)
+    return WorkItem(
+        id=item_id,
+        title=title,
+        item_type=item_type,
+        status=status,
+        file_path=file_path,
+        graph=doc.graph,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Unit tests: _obj_id
 # ---------------------------------------------------------------------------
@@ -190,82 +213,76 @@ class TestHasResearchItems:
         ]
         assert has_research_items(items) is False
 
-    def test_hdd_item_detected(self):
+    def test_hdd_item_without_graph(self):
+        """HDD item with no graph should not count as research item."""
         items = [
             WorkItem(id="H130.1", title="T", item_type=WorkItemType.HYPOTHESIS,
                      status=WorkItemStatus.BACKLOG, file_path=Path("/tmp/t.md")),
         ]
-        assert has_research_items(items) is True
+        assert has_research_items(items) is False
+
+    def test_hdd_item_with_graph_detected(self, nautical_repo):
+        """HDD item with a populated graph should be detected."""
+        fp = _write_hypothesis(nautical_repo, "H130.1", "Test", "PAPER-130", ">=85%")
+        item = _make_item_with_graph(fp, "H130.1", "Test", WorkItemType.HYPOTHESIS, WorkItemStatus.BACKLOG)
+        assert has_research_items([item]) is True
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: _parse_turtle_blocks
+# Unit tests: _first_triple (queries WorkItem.graph)
 # ---------------------------------------------------------------------------
 
 
-class TestParseTurtleBlocks:
+class TestFirstTriple:
     def test_hypothesis_paper_triple(self, nautical_repo):
-        """Fenced Turtle block should produce hyp:paper triple."""
+        """Hypothesis item graph should contain hyp:paper triple."""
         fp = _write_hypothesis(nautical_repo, "H130.1", "Test Hyp", "PAPER-130", ">=85%")
-        item = WorkItem(id="H130.1", title="Test Hyp", item_type=WorkItemType.HYPOTHESIS,
-                        status=WorkItemStatus.BACKLOG, file_path=fp)
-        g = _parse_turtle_blocks(item)
-        paper_val = _first_value(g, HYP.paper)
+        item = _make_item_with_graph(fp, "H130.1", "Test Hyp", WorkItemType.HYPOTHESIS, WorkItemStatus.BACKLOG)
+        paper_val = _first_triple(item, HYP.paper)
         assert paper_val is not None
         assert "PAPER-130" in paper_val
 
     def test_hypothesis_target_triple(self, nautical_repo):
-        """Fenced Turtle block should produce hyp:target triple."""
+        """Hypothesis item graph should contain hyp:target triple."""
         fp = _write_hypothesis(nautical_repo, "H130.1", "Test Hyp", "PAPER-130", ">=85%")
-        item = WorkItem(id="H130.1", title="Test Hyp", item_type=WorkItemType.HYPOTHESIS,
-                        status=WorkItemStatus.BACKLOG, file_path=fp)
-        g = _parse_turtle_blocks(item)
-        assert _first_value(g, HYP.target) == ">=85%"
+        item = _make_item_with_graph(fp, "H130.1", "Test Hyp", WorkItemType.HYPOTHESIS, WorkItemStatus.BACKLOG)
+        assert _first_triple(item, HYP.target) == ">=85%"
 
     def test_experiment_hypothesis_triple(self, nautical_repo):
-        """Fenced Turtle block should produce expr:hypothesis triple."""
+        """Experiment item graph should contain expr:hypothesis triple."""
         fp = _write_experiment(nautical_repo, "EXPR-130", "Test Exp", "PAPER-130", "H130.1")
-        item = WorkItem(id="EXPR-130", title="Test Exp", item_type=WorkItemType.EXPERIMENT,
-                        status=WorkItemStatus.IN_PROGRESS, file_path=fp)
-        g = _parse_turtle_blocks(item)
-        hyp_val = _first_value(g, EXPR.hypothesis)
+        item = _make_item_with_graph(fp, "EXPR-130", "Test Exp", WorkItemType.EXPERIMENT, WorkItemStatus.IN_PROGRESS)
+        hyp_val = _first_triple(item, EXPR.hypothesis)
         assert hyp_val is not None
         assert "H130.1" in hyp_val
 
     def test_experiment_paper_triple(self, nautical_repo):
-        """Fenced Turtle block should produce expr:paper triple."""
+        """Experiment item graph should contain expr:paper triple."""
         fp = _write_experiment(nautical_repo, "EXPR-130", "Test Exp", "PAPER-130", "H130.1")
-        item = WorkItem(id="EXPR-130", title="Test Exp", item_type=WorkItemType.EXPERIMENT,
-                        status=WorkItemStatus.IN_PROGRESS, file_path=fp)
-        g = _parse_turtle_blocks(item)
-        paper_val = _first_value(g, EXPR.paper)
+        item = _make_item_with_graph(fp, "EXPR-130", "Test Exp", WorkItemType.EXPERIMENT, WorkItemStatus.IN_PROGRESS)
+        paper_val = _first_triple(item, EXPR.paper)
         assert paper_val is not None
         assert "PAPER-130" in paper_val
 
     def test_measure_unit_category(self, nautical_repo):
-        """Fenced Turtle block should produce measure:unit and measure:category triples."""
+        """Measure item graph should contain measure:unit and measure:category triples."""
         fp = _write_measure(nautical_repo, "M-001", "Accuracy", "percent", "accuracy")
-        item = WorkItem(id="M-001", title="Accuracy", item_type=WorkItemType.MEASURE,
-                        status=WorkItemStatus.DONE, file_path=fp)
-        g = _parse_turtle_blocks(item)
-        assert _first_value(g, MEASURE.unit) == "percent"
-        assert _first_value(g, MEASURE.category) == "accuracy"
+        item = _make_item_with_graph(fp, "M-001", "Accuracy", WorkItemType.MEASURE, WorkItemStatus.DONE)
+        assert _first_triple(item, MEASURE.unit) == "percent"
+        assert _first_triple(item, MEASURE.category) == "accuracy"
 
-    def test_no_turtle_block_returns_empty_graph(self, tmp_path):
-        """File without Turtle block should return empty graph."""
+    def test_no_turtle_block_returns_none(self, tmp_path):
+        """Item without Turtle block should return None for HDD predicates."""
         fp = tmp_path / "test.md"
         fp.write_text("---\nid: EXP-001\ntitle: Test\ntype: expedition\nstatus: backlog\n---\n\n# Test\n")
-        item = WorkItem(id="EXP-001", title="Test", item_type=WorkItemType.EXPEDITION,
-                        status=WorkItemStatus.BACKLOG, file_path=fp)
-        g = _parse_turtle_blocks(item)
-        assert len(g) == 0
+        item = _make_item_with_graph(fp, "EXP-001", "Test", WorkItemType.EXPEDITION, WorkItemStatus.BACKLOG)
+        assert _first_triple(item, HYP.paper) is None
 
-    def test_missing_file_returns_empty_graph(self):
-        """Non-existent file should return empty graph."""
+    def test_no_graph_returns_none(self):
+        """Item with no graph should return None."""
         item = WorkItem(id="X-999", title="T", item_type=WorkItemType.HYPOTHESIS,
                         status=WorkItemStatus.BACKLOG, file_path=Path("/nonexistent/file.md"))
-        g = _parse_turtle_blocks(item)
-        assert len(g) == 0
+        assert _first_triple(item, HYP.paper) is None
 
 
 # ---------------------------------------------------------------------------
@@ -288,8 +305,7 @@ class TestRender:
     def test_hypothesis_renders_table(self, nautical_repo):
         """Hypothesis with Turtle block should render Research Interlinks section."""
         fp = _write_hypothesis(nautical_repo, "H130.1", "Test Hyp", "PAPER-130", ">=85%")
-        item = WorkItem(id="H130.1", title="Test Hyp", item_type=WorkItemType.HYPOTHESIS,
-                        status=WorkItemStatus.BACKLOG, file_path=fp)
+        item = _make_item_with_graph(fp, "H130.1", "Test Hyp", WorkItemType.HYPOTHESIS, WorkItemStatus.BACKLOG)
 
         buf = StringIO()
         console = Console(file=buf, force_terminal=True, width=120)
@@ -303,8 +319,7 @@ class TestRender:
     def test_experiment_renders_table(self, nautical_repo):
         """Experiment with Turtle block should render experiment table."""
         fp = _write_experiment(nautical_repo, "EXPR-130", "Signal Fusion", "PAPER-130", "H130.1")
-        item = WorkItem(id="EXPR-130", title="Signal Fusion", item_type=WorkItemType.EXPERIMENT,
-                        status=WorkItemStatus.IN_PROGRESS, file_path=fp)
+        item = _make_item_with_graph(fp, "EXPR-130", "Signal Fusion", WorkItemType.EXPERIMENT, WorkItemStatus.IN_PROGRESS)
 
         buf = StringIO()
         console = Console(file=buf, force_terminal=True, width=120)
@@ -317,8 +332,7 @@ class TestRender:
     def test_measure_renders_table(self, nautical_repo):
         """Measure with Turtle block should render measure table."""
         fp = _write_measure(nautical_repo, "M-001", "Accuracy", "percent", "accuracy")
-        item = WorkItem(id="M-001", title="Accuracy", item_type=WorkItemType.MEASURE,
-                        status=WorkItemStatus.DONE, file_path=fp)
+        item = _make_item_with_graph(fp, "M-001", "Accuracy", WorkItemType.MEASURE, WorkItemStatus.DONE)
 
         buf = StringIO()
         console = Console(file=buf, force_terminal=True, width=120)
