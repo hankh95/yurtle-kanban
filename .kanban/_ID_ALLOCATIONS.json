@@ -5,5 +5,12 @@
     "number": 1,
     "allocated_at": "2026-02-27T20:03:20.495815",
     "allocated_by": "unknown"
+  },
+  {
+    "id": "EXP-002",
+    "prefix": "EXP",
+    "number": 2,
+    "allocated_at": "2026-02-27T21:22:16.614038",
+    "allocated_by": "unknown"
   }
 ]
