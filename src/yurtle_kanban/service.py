@@ -129,6 +129,10 @@ class KanbanService:
             if isinstance(depends_on, str):
                 depends_on = [d.strip() for d in depends_on.split(",")]
 
+            related = frontmatter.get("related", [])
+            if isinstance(related, str):
+                related = [r.strip() for r in related.split(",")]
+
             created = None
             if "created" in frontmatter:
                 created_val = frontmatter["created"]
@@ -167,6 +171,7 @@ class KanbanService:
                 created=created,
                 tags=tags,
                 depends_on=depends_on,
+                related=related,
                 description=description,
                 resolution=resolution,
                 superseded_by=superseded_by,
