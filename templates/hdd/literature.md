@@ -4,11 +4,18 @@ title: ""
 type: literature
 status: draft
 created: YYYY-MM-DD
-source_idea: IDEA-R-XXX
 tags: []
 ---
 
 # Literature Review
+
+```turtle
+@prefix lit: <https://nusy.dev/literature/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<#LIT-XXX> a lit:Literature ;
+    rdfs:label "" .
+```
 
 ## Topic
 

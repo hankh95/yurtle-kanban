@@ -10,6 +10,14 @@ tags: []
 
 # Research Idea
 
+```turtle
+@prefix idea: <https://nusy.dev/idea/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<#IDEA-R-XXX> a idea:Idea ;
+    rdfs:label "" .
+```
+
 ## Observation
 
 What did you notice that sparked this idea?

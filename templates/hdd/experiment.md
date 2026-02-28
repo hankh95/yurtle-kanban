@@ -6,7 +6,6 @@ status: draft
 created: YYYY-MM-DD
 paper: PAPER-XXX
 hypothesis: H{paper}.{n}
-measures: [M-XXX]
 being: ""
 run_date: ""
 run_by: ""
@@ -14,6 +13,14 @@ tags: []
 ---
 
 # Experiment Title
+
+```turtle
+@prefix expr: <https://nusy.dev/experiment/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<#EXPR-{paper}> a expr:Experiment ;
+    rdfs:label "" .
+```
 
 ## Purpose
 

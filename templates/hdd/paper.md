@@ -6,11 +6,17 @@ status: draft
 created: YYYY-MM-DD
 authors: []
 tags: []
-hypotheses: []
-experiments: []
 ---
 
 # Paper Title
+
+```turtle
+@prefix paper: <https://nusy.dev/paper/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<#PAPER-XXX> a paper:Paper ;
+    rdfs:label "" .
+```
 
 ## Abstract
 

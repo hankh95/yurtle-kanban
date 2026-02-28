@@ -11,6 +11,14 @@ tags: []
 
 # Measure Definition
 
+```turtle
+@prefix measure: <https://nusy.dev/measure/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<#M-XXX> a measure:Measure ;
+    rdfs:label "" .
+```
+
 ## Description
 
 What does this measure capture?

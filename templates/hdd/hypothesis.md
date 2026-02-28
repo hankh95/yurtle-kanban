@@ -5,14 +5,19 @@ type: hypothesis
 status: draft
 created: YYYY-MM-DD
 paper: PAPER-XXX
-source_idea: IDEA-R-XXX
-literature: [LIT-XXX]
 target: ""
-unit: ""
 tags: []
 ---
 
 # Hypothesis Statement
+
+```turtle
+@prefix hyp: <https://nusy.dev/hypothesis/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<#H{paper}.{n}> a hyp:Hypothesis ;
+    rdfs:label "" .
+```
 
 > "{Measurable statement about expected outcome}"
 
