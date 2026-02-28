@@ -658,11 +658,17 @@ class TestValidateJson:
 class TestWorkItemGraph:
     """Tests for WorkItem.graph populated from fenced blocks."""
 
+    def test_graph_populated_on_create(self, temp_repo, nautical_config):
+        """create_item() should populate graph immediately."""
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(WorkItemType.EXPEDITION, "Test Graph")
+        assert item.graph is not None
+        assert len(item.graph) > 0
+
     def test_graph_populated_from_yaml_frontmatter(self, temp_repo, nautical_config):
-        """WorkItem.graph should contain triples from YAML frontmatter."""
+        """WorkItem.graph should contain triples from YAML frontmatter after scan."""
         svc = KanbanService(nautical_config, temp_repo)
         svc.create_item(WorkItemType.EXPEDITION, "Test Graph")
-        # Force re-scan so _parse_file() runs (create_item caches without graph)
         svc.scan()
         reloaded = svc.get_item("EXP-001")
         assert reloaded is not None
@@ -699,7 +705,7 @@ class TestWorkItemGraph:
         # Query for the fenced block triple
         from rdflib.namespace import RDFS
         labels = list(reloaded.graph.objects(predicate=RDFS.label))
-        assert any("Important finding" in str(l) for l in labels)
+        assert any("Important finding" in str(label) for label in labels)
 
     def test_get_knowledge_triples(self, temp_repo, nautical_config):
         """WorkItem.get_knowledge_triples() should query the graph."""
@@ -733,21 +739,12 @@ class TestWorkItemGraph:
         assert any("M-007" in m for m in measures)
         assert any("M-025" in m for m in measures)
 
-    def test_graph_none_without_yurtle_rdflib(self, temp_repo, nautical_config, monkeypatch):
-        """WorkItem.graph should be None if yurtle-rdflib import fails."""
-        import builtins
-        real_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == "yurtle_rdflib":
-                raise ImportError("mocked")
-            return real_import(name, *args, **kwargs)
-
+    def test_graph_none_without_yurtle_rdflib(self, temp_repo, nautical_config):
+        """WorkItem.graph should be None if yurtle-rdflib unavailable."""
         svc = KanbanService(nautical_config, temp_repo)
+        # Simulate yurtle-rdflib not being installed
+        svc._has_yurtle_rdflib = False
         svc.create_item(WorkItemType.EXPEDITION, "No RDFlib")
-
-        monkeypatch.setattr(builtins, "__import__", mock_import)
-        # Force re-scan with mocked import
         svc.scan()
         reloaded = svc.get_item("EXP-001")
         assert reloaded is not None
@@ -756,11 +753,24 @@ class TestWorkItemGraph:
     def test_graph_empty_for_yaml_only(self, temp_repo, nautical_config):
         """YAML-only files should still have a graph (from frontmatter conversion)."""
         svc = KanbanService(nautical_config, temp_repo)
-        svc.create_item(WorkItemType.EXPEDITION, "YAML Only")
-        # Force re-scan so _parse_file() runs
+        item = svc.create_item(WorkItemType.EXPEDITION, "YAML Only")
+        # create_item now populates graph immediately
+        assert item.graph is not None
+        assert len(item.graph) >= 1
+
+    def test_malformed_block_still_has_frontmatter_graph(self, temp_repo, nautical_config):
+        """Malformed turtle block should not prevent frontmatter graph parsing."""
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(WorkItemType.EXPEDITION, "Bad Block")
+
+        # Append a malformed turtle block
+        content = item.file_path.read_text()
+        content += '\n```turtle\nNOT VALID TURTLE!!!\n```\n'
+        item.file_path.write_text(content)
+
         svc.scan()
-        reloaded = svc.get_item("EXP-001")
+        reloaded = svc.get_item(item.id)
         assert reloaded is not None
+        # Graph should still exist with frontmatter triples (malformed block skipped)
         assert reloaded.graph is not None
-        # YAML frontmatter should produce at least some triples
         assert len(reloaded.graph) >= 1

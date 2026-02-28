@@ -24,6 +24,7 @@ from .config import KanbanConfig
 from .hooks import HookContext, HookEngine, HookEvent
 
 if TYPE_CHECKING:
+    from rdflib import Graph
     from .config import BoardConfig
 from .models import Board, Column, Comment, WorkItem, WorkItemStatus, WorkItemType
 from .workflow import WorkflowConfig, WorkflowParser
@@ -44,6 +45,12 @@ class KanbanService:
         self._hook_engine = HookEngine(
             hooks_config or (repo_root / ".kanban" / "hooks" / "kanban-hooks.yurtle.md")
         )
+        # Cache yurtle-rdflib availability (avoid repeated import attempts)
+        try:
+            import yurtle_rdflib  # noqa: F401
+            self._has_yurtle_rdflib = True
+        except ImportError:
+            self._has_yurtle_rdflib = False
         self._hook_engine.set_callback("create_item", self._hook_create_item)
 
     def scan(self) -> list[WorkItem]:
@@ -199,19 +206,19 @@ class KanbanService:
         except yaml.YAMLError:
             return None
 
-    def _parse_graph(self, content: str):
+    def _parse_graph(self, content: str) -> Graph | None:
         """Parse RDF graph from file content using yurtle-rdflib.
 
         Returns an rdflib.Graph with triples from both YAML/Turtle frontmatter
         and fenced ```turtle/```yurtle blocks in the markdown body.
         Returns None if yurtle-rdflib is not available or parsing fails.
         """
+        if not self._has_yurtle_rdflib:
+            return None
         try:
             import yurtle_rdflib
             doc = yurtle_rdflib.parse_yurtle(content)
             return doc.graph
-        except ImportError:
-            return None
         except Exception as e:
             logger.debug(f"Failed to parse graph: {e}")
             return None
@@ -632,10 +639,11 @@ class KanbanService:
         )
 
         # Write file — use pre-rendered content if provided
-        if content is not None:
-            path.write_text(content)
-        else:
-            path.write_text(item.to_markdown())
+        file_content = content if content is not None else item.to_markdown()
+        path.write_text(file_content)
+
+        # Parse RDF graph from written content
+        item.graph = self._parse_graph(file_content)
 
         # Add to cache
         self._items[item_id] = item
