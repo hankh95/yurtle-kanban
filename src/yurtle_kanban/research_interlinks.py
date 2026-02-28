@@ -6,10 +6,6 @@ graph for research relationships: hypothesis→paper, experiment→hypothesis,
 measure metadata.
 
 Only renders when linked items include HDD types with Turtle knowledge blocks.
-
-Note: yurtle-rdflib v0.1.0 only parses YAML frontmatter into WorkItem.graph.
-Fenced Turtle blocks require direct parsing with rdflib until yurtle-rdflib
-supports them. This module does that parsing on demand.
 """
 
 from __future__ import annotations
@@ -17,7 +13,6 @@ from __future__ import annotations
 import logging
 import re
 
-from rdflib import Graph, Namespace, RDFS
 from rich.console import Console
 from rich.table import Table
 
@@ -26,13 +21,21 @@ from .turtle_builder import PREFIXES
 
 logger = logging.getLogger(__name__)
 
-# Derive namespaces from turtle_builder.PREFIXES (single source of truth)
-HYP = Namespace(PREFIXES["hyp"])
-PAPER = Namespace(PREFIXES["paper"])
-EXPR = Namespace(PREFIXES["expr"])
-MEASURE = Namespace(PREFIXES["measure"])
-LIT = Namespace(PREFIXES["lit"])
-IDEA = Namespace(PREFIXES["idea"])
+try:
+    from rdflib import Graph, Namespace, RDFS
+
+    _has_rdflib = True
+except ImportError:
+    _has_rdflib = False
+
+if _has_rdflib:
+    # Derive namespaces from turtle_builder.PREFIXES (single source of truth)
+    HYP = Namespace(PREFIXES["hyp"])
+    PAPER = Namespace(PREFIXES["paper"])
+    EXPR = Namespace(PREFIXES["expr"])
+    MEASURE = Namespace(PREFIXES["measure"])
+    LIT = Namespace(PREFIXES["lit"])
+    IDEA = Namespace(PREFIXES["idea"])
 
 # HDD item types that carry research metadata
 HDD_TYPES = frozenset({
@@ -53,8 +56,8 @@ _STATUS_COLORS = {
     WorkItemStatus.READY: "blue",
 }
 
-# Regex to extract fenced turtle/yurtle blocks from markdown
-_TURTLE_BLOCK_RE = re.compile(r"```(?:turtle|yurtle)\s*\n(.*?)```", re.DOTALL)
+# Regex to extract fenced ```turtle blocks (not ```yurtle status blocks)
+_TURTLE_BLOCK_RE = re.compile(r"```turtle\s*\r?\n(.*?)^```", re.DOTALL | re.MULTILINE)
 
 
 def _parse_turtle_blocks(item: WorkItem) -> Graph:
@@ -95,10 +98,13 @@ def _obj_id(uri_str: str) -> str:
 
 
 def _first_value(graph: Graph, predicate) -> str | None:
-    """Get the first object value for a predicate from a graph."""
-    for _, _, obj in graph.triples((None, predicate, None)):
-        return str(obj)
-    return None
+    """Get the first object value for a predicate from a graph.
+
+    Sorts values lexicographically for deterministic results when
+    multiple objects exist for the same predicate.
+    """
+    values = sorted(str(obj) for _, _, obj in graph.triples((None, predicate, None)))
+    return values[0] if values else None
 
 
 def has_research_items(items: list[WorkItem]) -> bool:
@@ -110,8 +116,13 @@ def render_research_interlinks(items: list[WorkItem], console: Console) -> None:
     """Render research interlinks section for HDD items.
 
     Parses fenced Turtle blocks from each HDD item's file and displays
-    tables grouped by type. No output if no HDD items exist.
+    tables grouped by type. No output if no HDD items exist or rdflib
+    is not installed.
     """
+    if not _has_rdflib:
+        logger.debug("rdflib not available — skipping research interlinks")
+        return
+
     # Separate HDD items by type, parse their Turtle blocks
     hypotheses: list[tuple[WorkItem, Graph]] = []
     experiments: list[tuple[WorkItem, Graph]] = []
