@@ -63,6 +63,9 @@ Documentation = "https://github.com/hankh95/yurtle-kanban#readme"
 Repository = "https://github.com/hankh95/yurtle-kanban"
 Issues = "https://github.com/hankh95/yurtle-kanban/issues"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/yurtle_kanban"]
 
