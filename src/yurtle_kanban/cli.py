@@ -439,9 +439,16 @@ def move(
     try:
         status = WorkItemStatus.from_string(new_status)
     except ValueError:
-        console.print(f"[red]Unknown status: {new_status}[/red]")
-        console.print(f"Valid statuses: {', '.join(s.value for s in WorkItemStatus)}")
-        sys.exit(1)
+        # Try resolving as a theme alias (e.g., "active" → "in_progress" for HDD)
+        column_map = service._get_column_status_map()
+        resolved = column_map.get(new_status.lower().replace("-", "_").replace(" ", "_"))
+        if resolved:
+            status = resolved
+        else:
+            console.print(f"[red]Unknown status: {new_status}[/red]")
+            valid = sorted({s.value for s in WorkItemStatus} | set(column_map.keys()))
+            console.print(f"Valid statuses: {', '.join(valid)}")
+            sys.exit(1)
 
     try:
         item = service.move_item(

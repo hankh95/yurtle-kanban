@@ -482,14 +482,12 @@ class KanbanService:
         return sorted(columns, key=lambda c: c.order)
 
     def _get_column_status_map(self) -> dict[str, WorkItemStatus]:
-        """Get mapping from column IDs to WorkItemStatus for themed columns."""
-        # Default nautical theme mappings
-        mappings = {
-            "harbor": WorkItemStatus.BACKLOG,
-            "provisioning": WorkItemStatus.READY,
-            "underway": WorkItemStatus.IN_PROGRESS,
-            "approaching": WorkItemStatus.REVIEW,
-            "arrived": WorkItemStatus.DONE,
+        """Get mapping from column IDs to WorkItemStatus for themed columns.
+
+        Loads status_mappings from all configured board presets, then
+        falls back to hardcoded defaults for known themes.
+        """
+        mappings: dict[str, WorkItemStatus] = {
             # Standard software theme (identity mapping)
             "backlog": WorkItemStatus.BACKLOG,
             "ready": WorkItemStatus.READY,
@@ -497,12 +495,36 @@ class KanbanService:
             "review": WorkItemStatus.REVIEW,
             "done": WorkItemStatus.DONE,
             "blocked": WorkItemStatus.BLOCKED,
+            # Nautical theme
+            "harbor": WorkItemStatus.BACKLOG,
+            "provisioning": WorkItemStatus.READY,
+            "underway": WorkItemStatus.IN_PROGRESS,
+            "approaching": WorkItemStatus.REVIEW,
+            "arrived": WorkItemStatus.DONE,
             # Spec theme
             "draft": WorkItemStatus.BACKLOG,
             "proposed": WorkItemStatus.READY,
             "implementing": WorkItemStatus.IN_PROGRESS,
             "accepted": WorkItemStatus.DONE,
         }
+
+        # Load status_mappings from all configured board presets
+        from .config import _load_builtin_theme
+
+        presets_seen: set[str] = set()
+        if self.config.is_multi_board:
+            for board_config in self.config.boards:
+                if board_config.preset in presets_seen:
+                    continue
+                presets_seen.add(board_config.preset)
+                theme = _load_builtin_theme(board_config.preset, self.repo_root)
+                if theme and "status_mappings" in theme:
+                    for alias, canonical in theme["status_mappings"].items():
+                        try:
+                            mappings[alias] = WorkItemStatus.from_string(canonical)
+                        except ValueError:
+                            pass
+
         return mappings
 
     def _get_columns_from_theme(self) -> list[Column]:
@@ -1656,13 +1678,22 @@ class KanbanService:
 
         # Check WIP limits (unless skipped)
         if not skip_wip_check:
-            board = self.get_board()
+            # Determine which board this item belongs to
+            board_name = None
+            if self.config.is_multi_board and item.file_path:
+                board_config = self.config.get_board_for_path(
+                    item.file_path, self.repo_root
+                )
+                if board_config:
+                    board_name = board_config.name
+            board = self.get_board(board_name=board_name)
             for col in board.columns:
                 if col.id == new_status.value:
                     current_count = len(board.get_items_by_status(new_status))
                     if col.wip_limit and current_count >= col.wip_limit:
                         raise ValueError(
-                            f"WIP limit reached for {col.name} ({current_count}/{col.wip_limit})"
+                            f"WIP limit reached for {col.name} on {board.name} "
+                            f"({current_count}/{col.wip_limit})"
                         )
 
         # Update item
