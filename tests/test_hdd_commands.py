@@ -275,7 +275,7 @@ class TestHDDLiteratureCreate:
         assert "LIT-001" in result.output
 
     def test_literature_with_idea_link(self, runner, temp_repo, hdd_config):
-        """Literature should link to source idea."""
+        """Literature should link to source idea in Turtle block."""
         runner.invoke(main, ["idea", "create", "Base Idea"], catch_exceptions=False)
         result = runner.invoke(
             main,
@@ -284,12 +284,12 @@ class TestHDDLiteratureCreate:
         )
         assert result.exit_code == 0
         assert "LIT-001" in result.output
-        # Check file content
+        # Check file content — relationship is in Turtle block, not frontmatter
         lit_dir = temp_repo / "research" / "literature"
         files = list(lit_dir.glob("LIT-001*.md"))
         assert len(files) == 1
         content = files[0].read_text()
-        assert "source_idea: IDEA-R-001" in content
+        assert "lit:explores idea:IDEA-R-001" in content
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +404,51 @@ class TestHDDHypothesisCreate:
 
 
 # ---------------------------------------------------------------------------
+# TestHDDHypothesisTurtleBlock
+# ---------------------------------------------------------------------------
+
+
+class TestHDDHypothesisTurtleBlock:
+    """CLI integration tests for hypothesis Turtle block generation."""
+
+    def test_hypothesis_with_measures(self, runner, temp_repo, hdd_config):
+        """Hypothesis with --measures should include hyp:measuredBy in Turtle block."""
+        result = runner.invoke(
+            main,
+            [
+                "hypothesis", "create", "Accuracy improves",
+                "--paper", "130",
+                "--measures", "M-007,M-025",
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        hyp_dir = temp_repo / "research" / "hypotheses"
+        files = list(hyp_dir.glob("H130.1*.md"))
+        assert len(files) == 1
+        content = files[0].read_text()
+        assert "hyp:measuredBy measure:M-007, measure:M-025" in content
+
+    def test_hypothesis_with_literature(self, runner, temp_repo, hdd_config):
+        """Hypothesis with --literature should include hyp:informedBy in Turtle block."""
+        result = runner.invoke(
+            main,
+            [
+                "hypothesis", "create", "Better recall",
+                "--paper", "130",
+                "--literature", "LIT-001,LIT-003",
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        hyp_dir = temp_repo / "research" / "hypotheses"
+        files = list(hyp_dir.glob("H130.1*.md"))
+        assert len(files) == 1
+        content = files[0].read_text()
+        assert "hyp:informedBy lit:LIT-001, lit:LIT-003" in content
+
+
+# ---------------------------------------------------------------------------
 # TestHDDExperimentCreate
 # ---------------------------------------------------------------------------
 
@@ -454,6 +499,25 @@ class TestHDDExperimentCreate:
             ["experiment", "create", "EXPR-130", "--hypothesis", "H130.1"],
         )
         assert result.exit_code != 0
+
+    def test_experiment_with_measures(self, runner, temp_repo, hdd_config):
+        """Experiment with --measures should include expr:measure in Turtle block."""
+        result = runner.invoke(
+            main,
+            [
+                "experiment", "create", "EXPR-130",
+                "--hypothesis", "H130.1",
+                "--title", "Accuracy test",
+                "--measures", "M-007,M-025",
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        exp_dir = temp_repo / "research" / "experiments"
+        files = list(exp_dir.glob("EXPR-130*.md"))
+        assert len(files) == 1
+        content = files[0].read_text()
+        assert "expr:measure measure:M-007, measure:M-025" in content
 
     def test_experiment_file_links_hypothesis(self, runner, temp_repo, hdd_config):
         """Experiment file should reference the hypothesis."""

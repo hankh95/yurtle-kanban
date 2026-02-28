@@ -105,16 +105,6 @@ class TemplateEngine:
         if "paper_num" in variables:
             content = content.replace("{N}", variables["paper_num"])
 
-        # Substitute source_idea
-        if "source_idea" in variables:
-            content = re.sub(
-                r"^(source_idea:\s*).+$",
-                rf"\g<1>{variables['source_idea']}",
-                content,
-                count=1,
-                flags=re.MULTILINE,
-            )
-
         # Substitute hypothesis reference in experiment template
         if "hypothesis_id" in variables:
             content = re.sub(

@@ -12,8 +12,6 @@ Provides Click subgroups for creating HDD research items:
 
 from __future__ import annotations
 
-import sys
-
 import click
 from rich.console import Console
 
@@ -81,8 +79,7 @@ def idea_create(title: str, idea_type: str, priority: str, push: bool):
     try:
         content = engine.render("hdd", "idea", variables)
     except FileNotFoundError:
-        console.print("[red]HDD idea template not found[/red]")
-        sys.exit(1)
+        raise click.ClickException("HDD idea template not found")
 
     if push:
         result = service.create_item_and_push(
@@ -97,8 +94,7 @@ def idea_create(title: str, idea_type: str, priority: str, push: bool):
             console.print(f"[green]Created{pushed} {result['id']}: {title}[/green]")
             console.print(f"  File: {result['item'].file_path}")
         else:
-            console.print(f"[red]Failed: {result['message']}[/red]")
-            sys.exit(1)
+            raise click.ClickException(f"Failed: {result['message']}")
     else:
         item = service.create_item(
             item_type=WorkItemType.IDEA,
@@ -148,8 +144,7 @@ def literature_create(title: str, source_idea: str | None, priority: str, push: 
     try:
         content = engine.render("hdd", "literature", variables)
     except FileNotFoundError:
-        console.print("[red]HDD literature template not found[/red]")
-        sys.exit(1)
+        raise click.ClickException("HDD literature template not found")
 
     if push:
         result = service.create_item_and_push(
@@ -164,8 +159,7 @@ def literature_create(title: str, source_idea: str | None, priority: str, push: 
             console.print(f"[green]Created{pushed} {result['id']}: {title}[/green]")
             console.print(f"  File: {result['item'].file_path}")
         else:
-            console.print(f"[red]Failed: {result['message']}[/red]")
-            sys.exit(1)
+            raise click.ClickException(f"Failed: {result['message']}")
     else:
         item = service.create_item(
             item_type=WorkItemType.LITERATURE,
@@ -212,8 +206,7 @@ def paper_create(number: int, title: str, authors: str | None, priority: str, pu
     # Check for duplicate
     existing = service.get_item(item_id)
     if existing:
-        console.print(f"[red]{item_id} already exists: {existing.title}[/red]")
-        sys.exit(1)
+        raise click.ClickException(f"{item_id} already exists: {existing.title}")
 
     variables: dict[str, str] = {
         "id": item_id,
@@ -226,8 +219,7 @@ def paper_create(number: int, title: str, authors: str | None, priority: str, pu
     try:
         content = engine.render("hdd", "paper", variables)
     except FileNotFoundError:
-        console.print("[red]HDD paper template not found[/red]")
-        sys.exit(1)
+        raise click.ClickException("HDD paper template not found")
 
     if push:
         result = service.create_item_and_push(
@@ -242,8 +234,7 @@ def paper_create(number: int, title: str, authors: str | None, priority: str, pu
             console.print(f"[green]Created{pushed} {result['id']}: {title}[/green]")
             console.print(f"  File: {result['item'].file_path}")
         else:
-            console.print(f"[red]Failed: {result['message']}[/red]")
-            sys.exit(1)
+            raise click.ClickException(f"Failed: {result['message']}")
     else:
         item = service.create_item(
             item_type=WorkItemType.PAPER,
@@ -315,8 +306,7 @@ def hypothesis_create(
     # Check for duplicate
     existing = service.get_item(hyp_id)
     if existing:
-        console.print(f"[red]{hyp_id} already exists: {existing.title}[/red]")
-        sys.exit(1)
+        raise click.ClickException(f"{hyp_id} already exists: {existing.title}")
 
     variables: dict[str, str | list[str]] = {
         "id": hyp_id,
@@ -336,8 +326,7 @@ def hypothesis_create(
     try:
         content = engine.render("hdd", "hypothesis", variables)
     except FileNotFoundError:
-        console.print("[red]HDD hypothesis template not found[/red]")
-        sys.exit(1)
+        raise click.ClickException("HDD hypothesis template not found")
 
     if push:
         result = service.create_item_and_push(
@@ -352,8 +341,7 @@ def hypothesis_create(
             console.print(f"[green]Created{pushed} {result['id']}: {statement}[/green]")
             console.print(f"  File: {result['item'].file_path}")
         else:
-            console.print(f"[red]Failed: {result['message']}[/red]")
-            sys.exit(1)
+            raise click.ClickException(f"Failed: {result['message']}")
     else:
         item = service.create_item(
             item_type=WorkItemType.HYPOTHESIS,
@@ -402,8 +390,7 @@ def experiment_create(expr_id: str, hyp_id: str, title: str, measures: str | Non
     # Check for duplicate
     existing = service.get_item(expr_id)
     if existing:
-        console.print(f"[red]{expr_id} already exists: {existing.title}[/red]")
-        sys.exit(1)
+        raise click.ClickException(f"{expr_id} already exists: {existing.title}")
 
     # Extract paper number from hypothesis or EXPR ID
     paper_num = expr_id.replace("EXPR-", "")
@@ -422,8 +409,7 @@ def experiment_create(expr_id: str, hyp_id: str, title: str, measures: str | Non
     try:
         content = engine.render("hdd", "experiment", variables)
     except FileNotFoundError:
-        console.print("[red]HDD experiment template not found[/red]")
-        sys.exit(1)
+        raise click.ClickException("HDD experiment template not found")
 
     if push:
         result = service.create_item_and_push(
@@ -438,8 +424,7 @@ def experiment_create(expr_id: str, hyp_id: str, title: str, measures: str | Non
             console.print(f"[green]Created{pushed} {result['id']}: {title}[/green]")
             console.print(f"  File: {result['item'].file_path}")
         else:
-            console.print(f"[red]Failed: {result['message']}[/red]")
-            sys.exit(1)
+            raise click.ClickException(f"Failed: {result['message']}")
     else:
         item = service.create_item(
             item_type=WorkItemType.EXPERIMENT,
@@ -496,8 +481,7 @@ def measure_create(
     # Check for duplicate
     existing = service.get_item(measure_id)
     if existing:
-        console.print(f"[red]{measure_id} already exists: {existing.title}[/red]")
-        sys.exit(1)
+        raise click.ClickException(f"{measure_id} already exists: {existing.title}")
 
     variables: dict[str, str] = {
         "id": measure_id,
@@ -509,8 +493,7 @@ def measure_create(
     try:
         content = engine.render("hdd", "measure", variables)
     except FileNotFoundError:
-        console.print("[red]HDD measure template not found[/red]")
-        sys.exit(1)
+        raise click.ClickException("HDD measure template not found")
 
     if push:
         result = service.create_item_and_push(
@@ -525,8 +508,7 @@ def measure_create(
             console.print(f"[green]Created{pushed} {result['id']}: {title}[/green]")
             console.print(f"  File: {result['item'].file_path}")
         else:
-            console.print(f"[red]Failed: {result['message']}[/red]")
-            sys.exit(1)
+            raise click.ClickException(f"Failed: {result['message']}")
     else:
         item = service.create_item(
             item_type=WorkItemType.MEASURE,

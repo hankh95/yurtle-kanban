@@ -11,6 +11,14 @@ Principle: frontmatter describes the thing itself.
 from __future__ import annotations
 
 
+def _escape_turtle_string(value: str) -> str:
+    """Escape special characters for Turtle string literals.
+
+    Backslashes and double-quotes must be escaped inside "..." strings.
+    """
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 # Standard HDD prefixes used across research items.
 PREFIXES: dict[str, str] = {
     "hyp": "https://nusy.dev/hypothesis/",
@@ -76,7 +84,7 @@ class TurtleBlockBuilder:
     ) -> list[str]:
         prefixes.update(["idea", "rdfs"])
         item_id = variables.get("id", "IDEA-R-XXX")
-        title = variables.get("title", "")
+        title = _escape_turtle_string(variables.get("title", ""))
         return [
             f"<#{item_id}> a idea:Idea ;",
             f'    rdfs:label "{title}" .',
@@ -89,7 +97,7 @@ class TurtleBlockBuilder:
     ) -> list[str]:
         prefixes.update(["lit", "rdfs"])
         item_id = variables.get("id", "LIT-XXX")
-        title = variables.get("title", "")
+        title = _escape_turtle_string(variables.get("title", ""))
         lines = [
             f"<#{item_id}> a lit:Literature ;",
             f'    rdfs:label "{title}"',
@@ -109,7 +117,7 @@ class TurtleBlockBuilder:
     ) -> list[str]:
         prefixes.update(["paper", "rdfs"])
         item_id = variables.get("id", "PAPER-XXX")
-        title = variables.get("title", "")
+        title = _escape_turtle_string(variables.get("title", ""))
         return [
             f"<#{item_id}> a paper:Paper ;",
             f'    rdfs:label "{title}" .',
@@ -122,7 +130,7 @@ class TurtleBlockBuilder:
     ) -> list[str]:
         prefixes.update(["hyp", "rdfs"])
         item_id = variables.get("id", "H{paper}.{n}")
-        title = variables.get("title", "")
+        title = _escape_turtle_string(variables.get("title", ""))
         paper = variables.get("paper")
         lines = [
             f"<#{item_id}> a hyp:Hypothesis ;",
@@ -135,7 +143,7 @@ class TurtleBlockBuilder:
         target = variables.get("target")
         if target:
             lines[-1] += " ;"
-            lines.append(f'    hyp:target "{target}"')
+            lines.append(f'    hyp:target "{_escape_turtle_string(target)}"')
         source_idea = variables.get("source_idea")
         if source_idea:
             prefixes.add("idea")
@@ -163,7 +171,7 @@ class TurtleBlockBuilder:
     ) -> list[str]:
         prefixes.update(["expr", "rdfs"])
         item_id = variables.get("id", "EXPR-XXX")
-        title = variables.get("title", "")
+        title = _escape_turtle_string(variables.get("title", ""))
         paper = variables.get("paper")
         lines = [
             f"<#{item_id}> a expr:Experiment ;",
@@ -194,7 +202,7 @@ class TurtleBlockBuilder:
     ) -> list[str]:
         prefixes.update(["measure", "rdfs"])
         item_id = variables.get("id", "M-XXX")
-        title = variables.get("title", "")
+        title = _escape_turtle_string(variables.get("title", ""))
         lines = [
             f"<#{item_id}> a measure:Measure ;",
             f'    rdfs:label "{title}"',
@@ -202,11 +210,11 @@ class TurtleBlockBuilder:
         unit = variables.get("unit")
         if unit:
             lines[-1] += " ;"
-            lines.append(f'    measure:unit "{unit}"')
+            lines.append(f'    measure:unit "{_escape_turtle_string(unit)}"')
         category = variables.get("category")
         if category:
             lines[-1] += " ;"
-            lines.append(f'    measure:category "{category}"')
+            lines.append(f'    measure:category "{_escape_turtle_string(category)}"')
         lines[-1] += " ."
         return lines
 

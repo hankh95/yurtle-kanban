@@ -204,6 +204,22 @@ class TestEdgeCases:
     def test_unknown_type_returns_empty(self, builder):
         assert builder.build("unknown_type", {"id": "X"}) == ""
 
+    def test_title_with_quotes_escaped(self, builder):
+        """Titles containing double quotes should be escaped in rdfs:label."""
+        block = builder.build("idea", {
+            "id": "IDEA-R-001",
+            "title": 'Evaluating "Yurtle" Format',
+        })
+        assert r'rdfs:label "Evaluating \"Yurtle\" Format"' in block
+
+    def test_title_with_backslash_escaped(self, builder):
+        """Backslashes in titles should be escaped."""
+        block = builder.build("idea", {
+            "id": "IDEA-R-001",
+            "title": r"Path C:\data\test",
+        })
+        assert r'rdfs:label "Path C:\\data\\test"' in block
+
     def test_only_needed_prefixes_included(self, builder):
         block = builder.build("idea", {"id": "IDEA-R-001", "title": "Test"})
         assert "@prefix idea:" in block
