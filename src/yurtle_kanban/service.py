@@ -1274,7 +1274,7 @@ class KanbanService:
                 block = self._serialize_as_turtle_block(missing)
                 new_content = self._insert_turtle_block(content, block)
                 item.file_path.write_text(new_content)
-                item.graph = self._parse_graph(new_content)
+                item.graph = self._parse_graph(new_content) or Graph()
 
             results.append({
                 "path": str(item.file_path),
@@ -1328,6 +1328,10 @@ class KanbanService:
             source_idea = frontmatter.get("source_idea")
             if source_idea:
                 g.add((subject, _HYP.sourceIdea, _IDEA[str(source_idea)]))
+            literature = frontmatter.get("literature")
+            if literature:
+                for lit in (literature if isinstance(literature, list) else [literature]):
+                    g.add((subject, _HYP.informedBy, _LIT[str(lit)]))
 
         elif hdd_type == "experiment":
             paper = frontmatter.get("paper")
@@ -1364,14 +1368,19 @@ class KanbanService:
         Uses rdflib's Turtle serializer with HDD prefix bindings.
         Same pattern as _modify_turtle_block(): synthetic base URI,
         strip @base declaration from output.
+
+        Works on a copy to avoid mutating the caller's graph.
         """
         BASE = URIRef("urn:yurtle:block")
 
+        # Work on a copy to avoid mutating the input graph
+        work = Graph() + graph
+
         # Bind all HDD prefixes for clean serialization
         for name, uri in PREFIXES.items():
-            graph.bind(name, Namespace(uri))
+            work.bind(name, Namespace(uri))
 
-        result = graph.serialize(format="turtle", base=BASE)
+        result = work.serialize(format="turtle", base=BASE)
         if isinstance(result, bytes):
             result = result.decode("utf-8")
 

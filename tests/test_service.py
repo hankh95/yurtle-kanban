@@ -1163,6 +1163,33 @@ class TestBuildExpectedGraph:
         assert any(str(o) == "percent" for _, _, o in g)
         assert any(str(o) == "accuracy" for _, _, o in g)
 
+    def test_hypothesis_with_literature(self, hdd_repo, hdd_svc_config):
+        """Hypothesis with literature field produces hyp:informedBy triples."""
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        fm = {"id": "H50.1", "title": "Lit Hyp", "type": "hypothesis", "literature": ["LIT-001", "LIT-002"]}
+        g = svc._build_expected_graph("hypothesis", fm)
+        # type + label + 2 informedBy = 4 triples
+        assert len(g) == 4
+        assert any("LIT-001" in str(o) for _, _, o in g)
+        assert any("LIT-002" in str(o) for _, _, o in g)
+
+    def test_literature_with_source_idea(self, hdd_repo, hdd_svc_config):
+        """Literature with source_idea produces lit:explores triple."""
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        fm = {"id": "LIT-001", "title": "Survey", "type": "literature", "source_idea": "IDEA-R-001"}
+        g = svc._build_expected_graph("literature", fm)
+        # type + label + explores = 3 triples
+        assert len(g) == 3
+        assert any("IDEA-R-001" in str(o) for _, _, o in g)
+
+    def test_paper_graph(self, hdd_repo, hdd_svc_config):
+        """Paper frontmatter produces paper:Paper type + rdfs:label."""
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        fm = {"id": "PAPER-130", "title": "Brain Architecture", "type": "paper"}
+        g = svc._build_expected_graph("paper", fm)
+        assert len(g) == 2
+        assert any("Paper" in str(o) for _, _, o in g)
+
 
 # ---------------------------------------------------------------------------
 # TestSerializeAsTurtleBlock
@@ -1327,3 +1354,91 @@ class TestBackfillTurtleBlocks:
         assert "```turtle" in content
         assert "PAPER-130" in content
         assert ">=85%" in content
+
+    def test_literature_backfill_with_source_idea(self, hdd_repo, hdd_svc_config):
+        """Literature file with source_idea gets lit:explores triple."""
+        fp = hdd_repo / "research" / "literature" / "LIT-001-test.md"
+        fp.write_text(
+            "---\nid: LIT-001\ntitle: \"Survey of RDF\"\ntype: literature\n"
+            "status: captured\nsource_idea: IDEA-R-001\n"
+            "created: 2026-01-01\n---\n\n# LIT-001: Survey of RDF\n"
+        )
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        results = svc.backfill_turtle_blocks(dry_run=False)
+        backfilled = [r for r in results if r["action"] == "backfill"]
+        assert len(backfilled) == 1
+
+        content = fp.read_text()
+        assert "```turtle" in content
+        assert "lit:Literature" in content or "Literature" in content
+        assert "IDEA-R-001" in content
+
+    def test_paper_backfill(self, hdd_repo, hdd_svc_config):
+        """Paper file gets paper:Paper type + rdfs:label."""
+        fp = hdd_repo / "research" / "papers" / "PAPER-999-test.md"
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(
+            "---\nid: PAPER-999\ntitle: \"Test Paper\"\ntype: paper\n"
+            "status: draft\ncreated: 2026-01-01\n---\n\n# PAPER-999: Test Paper\n"
+        )
+        # Add papers scan path
+        hdd_svc_config.paths.scan_paths.append("research/papers/")
+        hdd_svc_config.save(hdd_repo / ".kanban" / "config.yaml")
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        results = svc.backfill_turtle_blocks(dry_run=False)
+        backfilled = [r for r in results if r["action"] == "backfill" and r["id"] == "PAPER-999"]
+        assert len(backfilled) == 1
+
+        content = fp.read_text()
+        assert "```turtle" in content
+        assert "paper:Paper" in content or "Paper" in content
+
+    def test_partial_block_augmented(self, hdd_repo, hdd_svc_config):
+        """File with turtle block missing some triples gets them added."""
+        fp = hdd_repo / "research" / "hypotheses" / "H200.1-test.md"
+        # Block has type triple but is missing label, paper, target
+        fp.write_text(
+            "---\nid: H200.1\ntitle: \"Partial Hyp\"\ntype: hypothesis\n"
+            "status: active\npaper: Paper200\ntarget: \">=90%\"\n"
+            "created: 2026-01-01\n---\n\n"
+            "```turtle\n"
+            "@prefix hyp: <https://nusy.dev/hyp/> .\n\n"
+            "<#H200.1> a hyp:Hypothesis .\n"
+            "```\n\n# H200.1: Partial Hyp\n"
+        )
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        results = svc.backfill_turtle_blocks(dry_run=False)
+        backfilled = [r for r in results if r["action"] == "backfill"]
+        assert len(backfilled) == 1
+        # Missing: label + paper + target = 3 triples
+        assert backfilled[0]["triples_added"] >= 3
+
+        content = fp.read_text()
+        assert "PAPER-200" in content
+        assert ">=90%" in content
+
+    def test_hypothesis_with_literature(self, hdd_repo, hdd_svc_config):
+        """Hypothesis with literature field gets hyp:informedBy triple."""
+        fp = hdd_repo / "research" / "hypotheses" / "H300.1-test.md"
+        fp.write_text(
+            "---\nid: H300.1\ntitle: \"Lit Hyp\"\ntype: hypothesis\n"
+            "status: active\nliterature:\n  - LIT-001\n  - LIT-002\n"
+            "created: 2026-01-01\n---\n\n# H300.1: Lit Hyp\n"
+        )
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        results = svc.backfill_turtle_blocks(dry_run=False)
+        backfilled = [r for r in results if r["action"] == "backfill"]
+        assert len(backfilled) == 1
+
+        content = fp.read_text()
+        assert "```turtle" in content
+        assert "LIT-001" in content
+        assert "LIT-002" in content
