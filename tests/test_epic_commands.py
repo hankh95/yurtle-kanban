@@ -1,4 +1,4 @@
-"""Tests for voyage/epic CLI commands (initiative management)."""
+"""Tests for epic/voyage CLI commands."""
 
 import subprocess
 
@@ -106,12 +106,44 @@ def software_runner(software_repo, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Voyage Create (nautical theme)
+# Epic Create (primary command, software theme)
+# ---------------------------------------------------------------------------
+
+
+class TestEpicCreate:
+    """Tests for 'yurtle-kanban epic create'."""
+
+    def test_epic_create_software(self, software_runner, software_repo):
+        """Create an epic in software theme should produce EPIC-XXX."""
+        result = software_runner.invoke(
+            main, ["epic", "create", "User Auth Overhaul"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        assert "EPIC-" in result.output
+        assert "User Auth Overhaul" in result.output
+
+    def test_epic_create_with_items(self, nautical_runner, nautical_repo):
+        """Create with --items should link items to the new epic."""
+        nautical_runner.invoke(
+            main, ["create", "expedition", "Phase 1 Work", "--priority", "high"],
+            catch_exceptions=False,
+        )
+        result = nautical_runner.invoke(
+            main, ["epic", "create", "Big Project", "--items", "EXP-001"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "Linked EXP-001" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Voyage Create (nautical alias)
 # ---------------------------------------------------------------------------
 
 
 class TestVoyageCreate:
-    """Tests for 'yurtle-kanban voyage create'."""
+    """Tests for 'yurtle-kanban voyage create' (nautical alias)."""
 
     def test_voyage_create_nautical(self, nautical_runner, nautical_repo):
         """Create a voyage in nautical theme should produce VOY-XXX."""
@@ -146,31 +178,12 @@ class TestVoyageCreate:
 
 
 # ---------------------------------------------------------------------------
-# Epic Create (software theme)
+# Epic Show
 # ---------------------------------------------------------------------------
 
 
-class TestEpicCreate:
-    """Tests for 'yurtle-kanban epic create'."""
-
-    def test_epic_create_software(self, software_runner, software_repo):
-        """Create an epic in software theme should produce EPIC-XXX."""
-        result = software_runner.invoke(
-            main, ["epic", "create", "User Auth Overhaul"],
-            catch_exceptions=False,
-        )
-        assert result.exit_code == 0, result.output
-        assert "EPIC-" in result.output
-        assert "User Auth Overhaul" in result.output
-
-
-# ---------------------------------------------------------------------------
-# Voyage Show
-# ---------------------------------------------------------------------------
-
-
-class TestVoyageShow:
-    """Tests for 'yurtle-kanban voyage show'."""
+class TestEpicShow:
+    """Tests for 'yurtle-kanban epic show' / 'voyage show'."""
 
     def test_show_existing_voyage(self, nautical_runner, nautical_repo):
         """Show should display a created voyage."""
@@ -185,21 +198,20 @@ class TestVoyageShow:
         assert result.exit_code == 0
         assert "Test Voyage" in result.output
 
-    def test_show_nonexistent_voyage(self, nautical_runner, nautical_repo):
-        """Show should fail for nonexistent ID."""
+    def test_show_nonexistent_raises_error(self, nautical_runner, nautical_repo):
+        """Show should fail for nonexistent ID with ClickException."""
         result = nautical_runner.invoke(
             main, ["voyage", "show", "VOY-999"],
         )
         assert result.exit_code != 0
+        assert "not found" in result.output
 
     def test_show_with_linked_items(self, nautical_runner, nautical_repo):
         """Show should display items linked via related field."""
-        # Create a voyage
         nautical_runner.invoke(
             main, ["voyage", "create", "Big Voyage"],
             catch_exceptions=False,
         )
-        # Create an expedition and link it
         nautical_runner.invoke(
             main, ["create", "expedition", "Phase 1 Work", "--priority", "high"],
             catch_exceptions=False,
@@ -218,16 +230,15 @@ class TestVoyageShow:
 
 
 # ---------------------------------------------------------------------------
-# Voyage Add
+# Epic Add
 # ---------------------------------------------------------------------------
 
 
-class TestVoyageAdd:
-    """Tests for 'yurtle-kanban voyage add'."""
+class TestEpicAdd:
+    """Tests for 'yurtle-kanban epic add' / 'voyage add'."""
 
     def test_add_links_item(self, nautical_runner, nautical_repo):
         """Add should write voyage ID to item's related field."""
-        # Create voyage and expedition
         nautical_runner.invoke(
             main, ["voyage", "create", "Link Test"],
             catch_exceptions=False,
@@ -272,15 +283,16 @@ class TestVoyageAdd:
         assert result.exit_code == 0
         assert "already linked" in result.output
 
-    def test_add_nonexistent_voyage(self, nautical_runner, nautical_repo):
-        """Adding to nonexistent voyage should fail."""
+    def test_add_nonexistent_epic_raises_error(self, nautical_runner, nautical_repo):
+        """Adding to nonexistent epic should fail with ClickException."""
         result = nautical_runner.invoke(
             main, ["voyage", "add", "VOY-999", "EXP-001"],
         )
         assert result.exit_code != 0
+        assert "not found" in result.output
 
-    def test_add_nonexistent_item(self, nautical_runner, nautical_repo):
-        """Adding nonexistent item should fail."""
+    def test_add_nonexistent_item_raises_error(self, nautical_runner, nautical_repo):
+        """Adding nonexistent item should fail with ClickException."""
         nautical_runner.invoke(
             main, ["voyage", "create", "Test"],
             catch_exceptions=False,
@@ -288,7 +300,6 @@ class TestVoyageAdd:
         result = nautical_runner.invoke(
             main, ["voyage", "add", "VOY-001", "EXP-999"],
         )
-        # Should warn about item not found (exits 0 with warning)
         assert "not found" in result.output
 
 
@@ -364,7 +375,6 @@ class TestRelatedField:
 
     def test_related_parsed_from_frontmatter(self, nautical_runner, nautical_repo):
         """Service should parse related field from frontmatter."""
-        # Create an item with related field
         exp_dir = nautical_repo / "kanban-work" / "expeditions"
         (exp_dir / "EXP-001-Test.md").write_text(
             "---\n"
@@ -388,16 +398,15 @@ class TestRelatedField:
 
 
 # ---------------------------------------------------------------------------
-# Board --voyage filter
+# Board --epic filter (NB4: strengthened assertions)
 # ---------------------------------------------------------------------------
 
 
-class TestBoardVoyageFilter:
-    """Tests for 'yurtle-kanban board --voyage'."""
+class TestBoardEpicFilter:
+    """Tests for 'yurtle-kanban board --epic'."""
 
-    def test_board_voyage_filter(self, nautical_runner, nautical_repo):
-        """Board --voyage should only show items linked to that voyage."""
-        # Create voyage + two expeditions, link only one
+    def test_board_epic_filter_shows_linked_excludes_unlinked(self, nautical_runner, nautical_repo):
+        """Board --epic should show linked item and exclude unlinked."""
         nautical_runner.invoke(
             main, ["voyage", "create", "Filter Test"],
             catch_exceptions=False,
@@ -415,21 +424,22 @@ class TestBoardVoyageFilter:
             catch_exceptions=False,
         )
         result = nautical_runner.invoke(
-            main, ["board", "--voyage", "VOY-001"],
+            main, ["board", "--epic", "VOY-001"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        # Board output should contain the linked item but exact rendering
-        # depends on board renderer — just verify no crash
+        # Rich table truncates IDs (EXP-001 → EXP-0…), so check titles
+        assert "Linked" in result.output
+        assert "Unlinked" not in result.output
 
 
 # ---------------------------------------------------------------------------
-# Epic command works for both themes
+# Cross-theme: epic in nautical, voyage in software
 # ---------------------------------------------------------------------------
 
 
-class TestEpicAliasWorksInNautical:
-    """Epic command should also work in nautical theme (creates voyage)."""
+class TestCrossTheme:
+    """Both commands work in any theme — they auto-detect."""
 
     def test_epic_command_in_nautical_creates_voyage(self, nautical_runner, nautical_repo):
         """Using 'epic create' in nautical theme should still create a VOY- item."""
@@ -440,10 +450,6 @@ class TestEpicAliasWorksInNautical:
         assert result.exit_code == 0
         assert "VOY-" in result.output
 
-
-class TestVoyageAliasWorksInSoftware:
-    """Voyage command should also work in software theme (creates epic)."""
-
     def test_voyage_command_in_software_creates_epic(self, software_runner, software_repo):
         """Using 'voyage create' in software theme should still create an EPIC- item."""
         result = software_runner.invoke(
@@ -452,3 +458,24 @@ class TestVoyageAliasWorksInSoftware:
         )
         assert result.exit_code == 0
         assert "EPIC-" in result.output
+
+
+# ---------------------------------------------------------------------------
+# NB2: --items + --push warns about partial state
+# ---------------------------------------------------------------------------
+
+
+class TestCreateItemsPushWarning:
+    """Using --items with --push should warn about local-only link changes."""
+
+    def test_items_push_warns(self, nautical_runner, nautical_repo):
+        """Create with --items and --push should print a warning."""
+        nautical_runner.invoke(
+            main, ["create", "expedition", "Phase 1", "--priority", "high"],
+            catch_exceptions=False,
+        )
+        result = nautical_runner.invoke(
+            main, ["voyage", "create", "Warned Voyage", "--items", "EXP-001", "--push"],
+        )
+        # --push without a remote will fail, but the warning should appear first
+        assert "Warning" in result.output or "local-only" in result.output

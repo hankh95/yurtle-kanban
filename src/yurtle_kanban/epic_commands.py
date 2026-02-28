@@ -1,18 +1,17 @@
 """
-Initiative CLI commands for yurtle-kanban.
+Epic CLI commands for yurtle-kanban.
 
-Provides theme-aware command groups for managing multi-item initiatives:
-- ``voyage`` group for nautical theme (creates VOY- items)
-- ``epic`` group for software theme (creates EPIC- items)
+``epic`` is the primary command group for managing multi-item work groupings.
+``voyage`` is a nautical-theme alias that behaves identically.
 
-Both groups share identical subcommands (create, show, add) and auto-detect
-the appropriate item type from the current theme configuration.
+Both auto-detect the current theme and create the appropriate item type:
+- Nautical theme → VOY- items (voyages)
+- Software theme → EPIC- items (epics)
 """
 
 from __future__ import annotations
 
 import re
-import sys
 from datetime import date
 
 import click
@@ -25,13 +24,13 @@ from .template_engine import TemplateEngine
 
 console = Console()
 
-# Map theme names to their initiative item type
-_INITIATIVE_TYPES: dict[str, WorkItemType] = {
+# Map theme names to their epic item type
+_EPIC_TYPES: dict[str, WorkItemType] = {
     "nautical": WorkItemType.VOYAGE,
     "software": WorkItemType.EPIC,
 }
 
-_INITIATIVE_TEMPLATES: dict[str, tuple[str, str]] = {
+_EPIC_TEMPLATES: dict[str, tuple[str, str]] = {
     # theme_name -> (template_theme, template_item_type)
     "nautical": ("nautical", "voyage"),
     "software": ("software", "epic"),
@@ -57,50 +56,50 @@ def _get_engine() -> TemplateEngine:
     return TemplateEngine(_get_templates_dir())
 
 
-def _detect_initiative_type(service) -> tuple[WorkItemType, str]:
-    """Detect the initiative item type from the current theme.
+def _detect_epic_type(service) -> tuple[WorkItemType, str]:
+    """Detect the epic/voyage item type from the current theme.
 
     Returns:
         (WorkItemType, theme_name) tuple.
 
     Raises:
-        click.ClickException if no initiative type for the current theme.
+        click.ClickException if no epic type for the current theme.
     """
     config = service.config
 
-    # Check multi-board: look for a board with an initiative-supporting theme
+    # Check multi-board: look for a board with an epic-supporting theme
     if config.is_multi_board:
         for board in config.boards:
             preset = getattr(board, "preset", None)
-            if preset in _INITIATIVE_TYPES:
-                return _INITIATIVE_TYPES[preset], preset
+            if preset in _EPIC_TYPES:
+                return _EPIC_TYPES[preset], preset
         # Fall back to first board's preset
         first_preset = getattr(config.boards[0], "preset", None) if config.boards else None
-        if first_preset in _INITIATIVE_TYPES:
-            return _INITIATIVE_TYPES[first_preset], first_preset
+        if first_preset in _EPIC_TYPES:
+            return _EPIC_TYPES[first_preset], first_preset
 
     # Single-board: check theme
     theme_name = getattr(config, "theme", None)
-    if theme_name in _INITIATIVE_TYPES:
-        return _INITIATIVE_TYPES[theme_name], theme_name
+    if theme_name in _EPIC_TYPES:
+        return _EPIC_TYPES[theme_name], theme_name
 
     # Try loading theme config to get the name
     theme = config.get_theme()
     if theme:
         name = theme.get("theme", {}).get("name", "")
-        if name in _INITIATIVE_TYPES:
-            return _INITIATIVE_TYPES[name], name
+        if name in _EPIC_TYPES:
+            return _EPIC_TYPES[name], name
 
     raise click.ClickException(
-        "No initiative type found for the current theme. "
-        "Voyages are supported in 'nautical' theme, epics in 'software' theme."
+        "Epics are supported in 'nautical' (as voyages) and 'software' themes. "
+        "Current theme does not support epics."
     )
 
 
-def _update_item_related(service, item_id: str, initiative_id: str) -> bool:
-    """Add initiative_id to an item's related list in its frontmatter.
+def _update_item_related(service, item_id: str, epic_id: str) -> bool:
+    """Add epic_id to an item's related list in its frontmatter.
 
-    Returns True if the file was updated, False if initiative_id was already present.
+    Returns True if the file was updated, False if epic_id was already present.
     """
     if not service._items:
         service.scan()
@@ -110,22 +109,25 @@ def _update_item_related(service, item_id: str, initiative_id: str) -> bool:
         return False
 
     content = item.file_path.read_text()
+    # Match frontmatter: opening --- through closing ---
     frontmatter_match = re.match(r"^---\n(.*?\n)---", content, re.DOTALL)
     if not frontmatter_match:
         console.print(f"[yellow]Warning: No frontmatter in {item_id}[/yellow]")
         return False
 
     fm_text = frontmatter_match.group(1)
+    fm_end = frontmatter_match.end()  # position of closing ---'s last char
     fm = yaml.safe_load(fm_text) or {}
 
     related = fm.get("related", [])
     if isinstance(related, str):
         related = [r.strip() for r in related.split(",")]
 
-    if initiative_id in related:
+    if epic_id in related:
         return False  # Already linked
 
-    related.append(initiative_id)
+    related.append(epic_id)
+    related_line = f"related: [{', '.join(related)}]"
 
     # Update the frontmatter in the file
     if re.search(r"^related:", fm_text, re.MULTILINE):
@@ -138,12 +140,11 @@ def _update_item_related(service, item_id: str, initiative_id: str) -> bool:
             flags=re.MULTILINE,
         )
     else:
-        # Insert related before the closing ---
-        new_content = content.replace(
-            "\n---",
-            f"\nrelated: [{', '.join(related)}]\n---",
-            1,
-        )
+        # Insert related before the closing --- using the match position
+        # fm_end points to the end of "---\n...---", so the closing ---
+        # starts at fm_end - 3
+        close_pos = fm_end - 3
+        new_content = content[:close_pos] + related_line + "\n" + content[close_pos:]
 
     item.file_path.write_text(new_content)
     item.related = related
@@ -156,12 +157,12 @@ def _update_item_related(service, item_id: str, initiative_id: str) -> bool:
 
 
 def _do_create(title: str, priority: str, items: str | None, push: bool):
-    """Create a new voyage or epic based on the current theme."""
+    """Create a new epic/voyage based on the current theme."""
     service = _get_service()
-    item_type, theme_name = _detect_initiative_type(service)
+    item_type, theme_name = _detect_epic_type(service)
 
     engine = _get_engine()
-    template_theme, template_type = _INITIATIVE_TEMPLATES[theme_name]
+    template_theme, template_type = _EPIC_TEMPLATES[theme_name]
 
     # Allocate ID
     prefix = service._get_type_prefix(item_type)
@@ -180,7 +181,14 @@ def _do_create(title: str, priority: str, items: str | None, push: bool):
         content = content.replace("{{DATE}}", date.today().isoformat())
         content = content.replace("{{TITLE}}", title)
 
-    type_label = _TYPE_LABELS.get(item_type, "Initiative")
+    type_label = _TYPE_LABELS.get(item_type, "Epic")
+
+    if push and items:
+        console.print(
+            "[yellow]Warning: --items with --push only commits the epic file. "
+            "Item link changes are local-only. Run 'git add' + 'git commit' "
+            "to include them.[/yellow]"
+        )
 
     if push:
         item = service.create_item_and_push(
@@ -212,29 +220,28 @@ def _do_create(title: str, priority: str, items: str | None, push: bool):
                 console.print(f"  {linked_id} already linked or not found")
 
 
-def _do_show(initiative_id: str):
-    """Show an initiative with its linked items and progress."""
+def _do_show(epic_id: str):
+    """Show an epic/voyage with its linked items and progress."""
     service = _get_service()
     if not service._items:
         service.scan()
 
-    initiative = service._items.get(initiative_id)
-    if initiative is None:
-        console.print(f"[red]{initiative_id} not found[/red]")
-        sys.exit(1)
+    epic_item = service._items.get(epic_id)
+    if epic_item is None:
+        raise click.ClickException(f"{epic_id} not found")
 
-    # Find all items with this initiative in their related list
+    # Find all items with this epic in their related list
     linked_items = [
         item
         for item in service._items.values()
-        if initiative_id in item.related and item.id != initiative_id
+        if epic_id in item.related and item.id != epic_id
     ]
     linked_items.sort(key=lambda i: (-i.priority_score, i.id))
 
-    # Also check if the initiative itself lists items in its related field
+    # Also check if the epic itself lists items in its related field
     # (bidirectional linking)
     linked_ids = {i.id for i in linked_items}
-    for rel_id in initiative.related:
+    for rel_id in epic_item.related:
         if rel_id not in linked_ids:
             rel_item = service._items.get(rel_id)
             if rel_item:
@@ -249,18 +256,18 @@ def _do_show(initiative_id: str):
         WorkItemStatus.READY: "blue",
     }
 
-    type_label = _TYPE_LABELS.get(initiative.item_type, "Initiative")
-    color = status_colors.get(initiative.status, "white")
+    type_label = _TYPE_LABELS.get(epic_item.item_type, "Epic")
+    color = status_colors.get(epic_item.status, "white")
     console.print(
-        f"\n[bold]{type_label} {initiative.id}[/bold]: {initiative.title} "
-        f"[{color}]({initiative.status.value})[/{color}]"
+        f"\n[bold]{type_label} {epic_item.id}[/bold]: {epic_item.title} "
+        f"[{color}]({epic_item.status.value})[/{color}]"
     )
 
     if not linked_items:
-        cmd = "voyage" if initiative.item_type == WorkItemType.VOYAGE else "epic"
+        cmd = "voyage" if epic_item.item_type == WorkItemType.VOYAGE else "epic"
         console.print("  No linked items found.")
         console.print(
-            f"  [dim]Link items with: yurtle-kanban {cmd} add {initiative_id} ITEM-ID[/dim]"
+            f"  [dim]Link items with: yurtle-kanban {cmd} add {epic_id} ITEM-ID[/dim]"
         )
         return
 
@@ -291,72 +298,34 @@ def _do_show(initiative_id: str):
     console.print(table)
 
 
-def _do_add(initiative_id: str, item_id: str):
-    """Link an item to a voyage/epic by adding it to the item's related field."""
+def _do_add(epic_id: str, item_id: str):
+    """Link an item to an epic/voyage by adding it to the item's related field."""
     service = _get_service()
     if not service._items:
         service.scan()
 
-    # Verify initiative exists
-    if initiative_id not in service._items:
-        console.print(f"[red]{initiative_id} not found[/red]")
-        sys.exit(1)
+    # Verify epic exists
+    if epic_id not in service._items:
+        raise click.ClickException(f"{epic_id} not found")
 
-    if _update_item_related(service, item_id, initiative_id):
-        console.print(f"Linked [bold]{item_id}[/bold] → [bold]{initiative_id}[/bold]")
+    if _update_item_related(service, item_id, epic_id):
+        console.print(f"Linked [bold]{item_id}[/bold] → [bold]{epic_id}[/bold]")
     else:
         item = service._items.get(item_id)
         if item is None:
-            console.print(f"[red]Item {item_id} not found[/red]")
-            sys.exit(1)
+            raise click.ClickException(f"Item {item_id} not found")
         else:
-            console.print(f"{item_id} is already linked to {initiative_id}")
+            console.print(f"{item_id} is already linked to {epic_id}")
 
 
 # ---------------------------------------------------------------------------
-# ``voyage`` command group (nautical theme)
-# ---------------------------------------------------------------------------
-
-
-@click.group()
-def voyage():
-    """Manage voyages — multi-item initiatives grouping related expeditions."""
-    pass
-
-
-@voyage.command("create")
-@click.argument("title")
-@click.option("--priority", "-p", default="high", help="Priority level")
-@click.option("--items", help="Comma-separated item IDs to link")
-@click.option("--push", is_flag=True, help="Commit and push (atomic)")
-def voyage_create(title: str, priority: str, items: str | None, push: bool):
-    """Create a new voyage (or epic, based on theme)."""
-    _do_create(title, priority, items, push)
-
-
-@voyage.command("show")
-@click.argument("initiative_id")
-def voyage_show(initiative_id: str):
-    """Show a voyage/epic with linked items and progress."""
-    _do_show(initiative_id)
-
-
-@voyage.command("add")
-@click.argument("initiative_id")
-@click.argument("item_id")
-def voyage_add(initiative_id: str, item_id: str):
-    """Link an item to a voyage/epic."""
-    _do_add(initiative_id, item_id)
-
-
-# ---------------------------------------------------------------------------
-# ``epic`` command group (software theme)
+# ``epic`` command group (primary)
 # ---------------------------------------------------------------------------
 
 
 @click.group()
 def epic():
-    """Manage epics — multi-item initiatives grouping related features."""
+    """Manage epics — multi-item groupings of related work."""
     pass
 
 
@@ -366,20 +335,56 @@ def epic():
 @click.option("--items", help="Comma-separated item IDs to link")
 @click.option("--push", is_flag=True, help="Commit and push (atomic)")
 def epic_create(title: str, priority: str, items: str | None, push: bool):
-    """Create a new epic (or voyage, based on theme)."""
+    """Create a new epic (or voyage in nautical theme)."""
     _do_create(title, priority, items, push)
 
 
 @epic.command("show")
-@click.argument("initiative_id")
-def epic_show(initiative_id: str):
-    """Show an epic/voyage with linked items and progress."""
-    _do_show(initiative_id)
+@click.argument("epic_id")
+def epic_show(epic_id: str):
+    """Show an epic with linked items and progress."""
+    _do_show(epic_id)
 
 
 @epic.command("add")
-@click.argument("initiative_id")
+@click.argument("epic_id")
 @click.argument("item_id")
-def epic_add(initiative_id: str, item_id: str):
-    """Link an item to an epic/voyage."""
-    _do_add(initiative_id, item_id)
+def epic_add(epic_id: str, item_id: str):
+    """Link an item to an epic."""
+    _do_add(epic_id, item_id)
+
+
+# ---------------------------------------------------------------------------
+# ``voyage`` command group (nautical alias)
+# ---------------------------------------------------------------------------
+
+
+@click.group()
+def voyage():
+    """Manage voyages — nautical alias for 'epic'."""
+    pass
+
+
+@voyage.command("create")
+@click.argument("title")
+@click.option("--priority", "-p", default="high", help="Priority level")
+@click.option("--items", help="Comma-separated item IDs to link")
+@click.option("--push", is_flag=True, help="Commit and push (atomic)")
+def voyage_create(title: str, priority: str, items: str | None, push: bool):
+    """Create a new voyage (or epic in software theme)."""
+    _do_create(title, priority, items, push)
+
+
+@voyage.command("show")
+@click.argument("epic_id")
+def voyage_show(epic_id: str):
+    """Show a voyage with linked items and progress."""
+    _do_show(epic_id)
+
+
+@voyage.command("add")
+@click.argument("epic_id")
+@click.argument("item_id")
+def voyage_add(epic_id: str, item_id: str):
+    """Link an item to a voyage."""
+    _do_add(epic_id, item_id)
