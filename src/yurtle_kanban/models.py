@@ -5,11 +5,16 @@ These models represent the core data structures for file-based kanban.
 Each WorkItem corresponds to a Yurtle markdown file.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rdflib import Graph, URIRef
 
 
 class WorkItemStatus(Enum):
@@ -123,6 +128,7 @@ class WorkItem:
     metadata: dict[str, Any] = field(default_factory=dict)
     resolution: str | None = None  # completed, superseded, wont_do, duplicate, obsolete, merged
     superseded_by: list[str] = field(default_factory=list)  # list of item IDs
+    graph: Graph | None = None  # RDF graph from frontmatter + fenced blocks
 
     def __post_init__(self):
         if self.updated is None:
@@ -150,6 +156,16 @@ class WorkItem:
         }
         return priority_map.get(self.priority or "medium", 50)
 
+    def get_knowledge_triples(self, predicate: URIRef) -> list[str]:
+        """Get all object values for a predicate from the knowledge graph.
+
+        Queries the RDF graph (frontmatter + fenced blocks) for all triples
+        matching (any_subject, predicate, ?object) and returns string values.
+        """
+        if self.graph is None:
+            return []
+        return [str(obj) for _, _, obj in self.graph.triples((None, predicate, None))]
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -169,6 +185,7 @@ class WorkItem:
             "description": self.description,
             "resolution": self.resolution,
             "superseded_by": self.superseded_by,
+            "triple_count": len(self.graph) if self.graph else 0,
         }
 
     def to_yurtle(self) -> str:

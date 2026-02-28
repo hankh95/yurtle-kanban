@@ -207,6 +207,9 @@ def render_item_detail(item: WorkItem, console: Console | None = None) -> None:
     if item.depends_on:
         table.add_row("Depends On", ", ".join(item.depends_on))
 
+    if item.graph and len(item.graph) > 0:
+        table.add_row("Triples", str(len(item.graph)))
+
     table.add_row("File", str(item.file_path))
 
     console.print(table)

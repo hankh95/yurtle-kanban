@@ -110,6 +110,7 @@ class WorkItemIndexer:
                 item_type=item_type,
                 status=status,
                 file_path=file_path,
+                graph=g,
             )
 
         except Exception:

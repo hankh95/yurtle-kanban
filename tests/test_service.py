@@ -653,3 +653,124 @@ class TestValidateJson:
         result = runner.invoke(main, ["validate"], catch_exceptions=False)
         assert result.exit_code == 0
         assert "All work items valid" in result.output
+
+
+class TestWorkItemGraph:
+    """Tests for WorkItem.graph populated from fenced blocks."""
+
+    def test_graph_populated_on_create(self, temp_repo, nautical_config):
+        """create_item() should populate graph immediately."""
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(WorkItemType.EXPEDITION, "Test Graph")
+        assert item.graph is not None
+        assert len(item.graph) > 0
+
+    def test_graph_populated_from_yaml_frontmatter(self, temp_repo, nautical_config):
+        """WorkItem.graph should contain triples from YAML frontmatter after scan."""
+        svc = KanbanService(nautical_config, temp_repo)
+        svc.create_item(WorkItemType.EXPEDITION, "Test Graph")
+        svc.scan()
+        reloaded = svc.get_item("EXP-001")
+        assert reloaded is not None
+        assert reloaded.graph is not None
+        assert len(reloaded.graph) > 0
+
+    def test_graph_includes_fenced_blocks(self, temp_repo, nautical_config):
+        """WorkItem.graph should include triples from fenced turtle blocks."""
+        from rdflib import Namespace
+
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(WorkItemType.EXPEDITION, "Graph Blocks")
+
+        # Add a fenced turtle block to the file
+        content = item.file_path.read_text()
+        block = '''
+```turtle
+@prefix test: <https://test.dev/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<#finding> a test:Discovery ;
+    rdfs:label "Important finding" .
+```
+'''
+        content += block
+        item.file_path.write_text(content)
+
+        # Force re-scan to pick up file changes
+        svc.scan()
+        reloaded = svc.get_item(item.id)
+        assert reloaded is not None
+        assert reloaded.graph is not None
+
+        # Query for the fenced block triple
+        from rdflib.namespace import RDFS
+        labels = list(reloaded.graph.objects(predicate=RDFS.label))
+        assert any("Important finding" in str(label) for label in labels)
+
+    def test_get_knowledge_triples(self, temp_repo, nautical_config):
+        """WorkItem.get_knowledge_triples() should query the graph."""
+        from rdflib import Namespace
+
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(WorkItemType.EXPEDITION, "Knowledge Query")
+
+        # Add HDD-style turtle block
+        content = item.file_path.read_text()
+        block = '''
+```turtle
+@prefix hyp: <https://nusy.dev/hypothesis/> .
+@prefix paper: <https://nusy.dev/paper/> .
+@prefix measure: <https://nusy.dev/measure/> .
+
+<#H130.1> a hyp:Hypothesis ;
+    hyp:paper paper:PAPER-130 ;
+    hyp:measuredBy measure:M-007, measure:M-025 .
+```
+'''
+        content += block
+        item.file_path.write_text(content)
+
+        # Force re-scan to pick up file changes
+        svc.scan()
+        reloaded = svc.get_item(item.id)
+        hyp = Namespace("https://nusy.dev/hypothesis/")
+        measures = reloaded.get_knowledge_triples(hyp.measuredBy)
+        assert len(measures) == 2
+        assert any("M-007" in m for m in measures)
+        assert any("M-025" in m for m in measures)
+
+    def test_graph_none_without_yurtle_rdflib(self, temp_repo, nautical_config):
+        """WorkItem.graph should be None if yurtle-rdflib unavailable."""
+        svc = KanbanService(nautical_config, temp_repo)
+        # Simulate yurtle-rdflib not being installed
+        svc._has_yurtle_rdflib = False
+        svc.create_item(WorkItemType.EXPEDITION, "No RDFlib")
+        svc.scan()
+        reloaded = svc.get_item("EXP-001")
+        assert reloaded is not None
+        assert reloaded.graph is None
+
+    def test_graph_empty_for_yaml_only(self, temp_repo, nautical_config):
+        """YAML-only files should still have a graph (from frontmatter conversion)."""
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(WorkItemType.EXPEDITION, "YAML Only")
+        # create_item now populates graph immediately
+        assert item.graph is not None
+        assert len(item.graph) >= 1
+
+    def test_malformed_block_still_has_frontmatter_graph(self, temp_repo, nautical_config):
+        """Malformed turtle block should not prevent frontmatter graph parsing."""
+        svc = KanbanService(nautical_config, temp_repo)
+        item = svc.create_item(WorkItemType.EXPEDITION, "Bad Block")
+
+        # Append a malformed turtle block
+        content = item.file_path.read_text()
+        content += '\n```turtle\nNOT VALID TURTLE!!!\n```\n'
+        item.file_path.write_text(content)
+
+        svc.scan()
+        reloaded = svc.get_item(item.id)
+        assert reloaded is not None
+        # Graph should still exist with frontmatter triples (malformed block skipped)
+        assert reloaded.graph is not None
+        assert len(reloaded.graph) >= 1
