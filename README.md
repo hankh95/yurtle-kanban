@@ -85,7 +85,9 @@ yurtle-kanban export --format json
 | `create` | Create a new work item (`--push` for atomic multi-agent safety) |
 | `move` | Move item to new status (with `--assign`, `--force`) |
 | `show` | Show item details |
-| `board` | Display kanban board in terminal |
+| `board` | Display kanban board (`board research`, `board --all`, `board --campaign VOY-XXX`) |
+| `boards` | List configured boards |
+| `board-add` | Add a new board (`--preset hdd` for research) |
 | `stats` | Show board statistics |
 | `roadmap` | Prioritized view of all non-done items |
 | `history` | Completed work log with time filters |
@@ -96,6 +98,13 @@ yurtle-kanban export --format json
 | `comment` | Add comment to item |
 | `export` | Export board to HTML/Markdown/JSON |
 | `validate` | Check for ID mismatches and duplicates |
+| `voyage/epic` | Campaign management: `create`, `show`, `add` |
+| `idea` | HDD: Create research/feature ideas |
+| `literature` | HDD: Create literature reviews |
+| `paper` | HDD: Create research papers |
+| `hypothesis` | HDD: Create testable hypotheses |
+| `experiment` | HDD: Create experiments |
+| `measure` | HDD: Create metrics/measures |
 
 ### Preventing Duplicate IDs (Multi-Agent Safe)
 
@@ -210,20 +219,27 @@ Idea (IDEA-R-), Literature (LIT-), Paper (PAPER-), Hypothesis (H{paper}.{n}), Ex
 Columns: Draft → Active → Complete → Abandoned
 ```
 
-Use HDD for research workflows where experiments validate enhancements before merging:
+Use HDD for research workflows where experiments validate hypotheses:
 
 ```bash
 # Add HDD board for research
 yurtle-kanban board-add research --preset hdd --path research/
 
-# Create HDD items
-yurtle-kanban create --board research idea "Research question"
-yurtle-kanban create --board research hypothesis "H42.1: Caching improves latency"
-yurtle-kanban create --board research experiment "EXPR-42"
+# Create HDD items with dedicated CLI commands
+yurtle-kanban idea create "Research question" --type research --push
+yurtle-kanban literature create "Prior art survey" --idea IDEA-R-001 --push
+yurtle-kanban paper create 130 "Cognitive Signal Fusion" --push
+yurtle-kanban hypothesis create "V12 improves accuracy" --paper 130 --target ">=85%" --push
+yurtle-kanban experiment create EXPR-130 --hypothesis H130.1 --title "Accuracy test" --push
+yurtle-kanban measure create "Reasoning Accuracy" --unit percent --category accuracy --push
 
 # View research board
 yurtle-kanban board research
 ```
+
+Each HDD item gets a fenced ` ```turtle ` knowledge block with RDF triples expressing
+research relationships (hypothesis→paper, experiment→hypothesis, etc.). Creating a child
+item automatically updates the parent's knowledge block with an inverse reference.
 
 **Custom:** Define your own in `themes/my-theme.yaml`
 
@@ -512,6 +528,37 @@ jobs:
 | PR integration | Work item changes visible in pull requests |
 
 ## Changelog
+
+### v1.12.0 (unreleased)
+
+**Graph-native knowledge blocks and research tooling.**
+
+#### Added
+- **Multi-board support** — Run multiple kanban boards in one repo (`board-add`, `board research`, `board --all`, `boards`). Each board has its own theme, paths, and columns (#14)
+- **HDD (Hypothesis-Driven Development) theme** — Full research workflow: Idea → Literature → Paper → Hypothesis → Experiment → Measure. Preset available via `board-add --preset hdd` (#14)
+- **HDD CLI commands** — Dedicated subcommands for research items: `idea create`, `literature create`, `paper create`, `hypothesis create`, `experiment create`, `measure create`. Auto-allocate IDs, link relationships, support `--push` (#16)
+- **HDD Claude Code skills** — `/idea`, `/literature`, `/paper`, `/hypothesis`, `/experiment`, `/measure` skills for AI agent workflows
+- **Turtle knowledge blocks** — HDD items get fenced ` ```turtle ` blocks with RDF triples expressing research relationships (`hyp:paper`, `hyp:measuredBy`, `expr:hypothesis`, etc.) (#25)
+- **Campaign CLI** — `voyage create/show/add` (nautical) and `epic create/show/add` (software) for managing multi-item initiatives. `board --campaign VOY-XXX` for filtered views (#24)
+- **Research interlinks in `voyage show`** — When a voyage links HDD items, `voyage show` displays a Research Interlinks section with hypothesis targets, experiment status, and measure metadata parsed from Turtle blocks (#30)
+- **Auto-update parent knowledge blocks** — Creating a child item (hypothesis, experiment, literature) automatically adds an inverse RDF triple to the parent's Turtle block using rdflib (#31)
+- **`WorkItem.graph`** — Every work item now carries an `rdflib.Graph` with triples from both YAML frontmatter and fenced Turtle blocks, queryable via SPARQL (#29)
+- **Event-driven hooks** — `kanban-hooks.yurtle.md` with `create_item` and `notify` actions, recursion guard, event wiring (#15, #17)
+
+#### Changed
+- **rdflib is required** — yurtle-kanban is a graph-native product. Importing without rdflib/yurtle-rdflib raises `ImportError` with a friendly message (#27)
+- **Shared data resolution** — Templates and themes resolve via `sys.prefix` for pip-installed environments (#19, #20, #23)
+
+#### Fixed
+- HDD item type routing in multi-board mode (#20)
+- Template path resolution for pip-installed packages (#19)
+
+### v1.11.0
+- **`--json` flag** — `show` and `validate` commands support `--json` output (#13)
+
+### v1.10.0
+- **Fail-closed rule evaluation** — Unknown workflow conditions fail closed (deny) instead of open. Resolution fields (`resolution`, `superseded_by`) for done items. `--force` moves are audited with `kb:forcedMove` in RDF status history (#11)
+- **CLAUDE.md** — Developer practices and PR workflow documentation
 
 ### v1.9.0
 - **Theme-specific skills** — Skills are now organized by theme (`skills/nautical/`, `skills/software/`). Software theme gets `/feature`, `/work`, `/done`, `/review`, `/handoff`, `/blocked` with FEAT-prefixed terminology. Theme-neutral skills (`/sync`, `/status`, `/release`) stay shared.
