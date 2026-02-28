@@ -57,6 +57,16 @@ _HDD_TYPE_CLASSES: dict[str, URIRef] = {
     "measure": _MEASURE.Measure,
 }
 
+_PAPER_PREFIX_RE = re.compile(r"^[Pp]aper", re.IGNORECASE)
+
+
+def _normalize_paper_num(raw: str | int) -> str:
+    """Extract the numeric part from a paper field value.
+
+    Handles: 130, "130", "Paper130", "paper130", "PAPER130".
+    """
+    return _PAPER_PREFIX_RE.sub("", str(raw))
+
 
 class KanbanService:
     """Service for managing kanban work items."""
@@ -1163,6 +1173,41 @@ class KanbanService:
         lines = [line for line in lines if not line.startswith("@base ")]
         return "\n".join(lines), True
 
+    def _merge_into_existing_block(
+        self, content: str, match: re.Match, missing: Graph
+    ) -> str:
+        """Merge missing triples into an existing fenced turtle block.
+
+        Parses the existing block with rdflib, adds the missing triples,
+        serializes back, and replaces the block in place.
+        """
+        BASE = URIRef("urn:yurtle:block")
+        g = Graph()
+        try:
+            g.parse(data=match.group(2), format="turtle", publicID=str(BASE))
+        except Exception as e:
+            logger.warning(f"Failed to parse existing block for merge: {e}")
+            # Fall back to inserting a new block
+            block = self._serialize_as_turtle_block(missing)
+            return self._insert_turtle_block(content, block)
+
+        # Add missing triples (subjects already normalized by caller)
+        for s, p, o in missing:
+            g.add((s, p, o))
+
+        # Bind prefixes and serialize
+        for name, uri in PREFIXES.items():
+            g.bind(name, Namespace(uri))
+        result = g.serialize(format="turtle", base=BASE)
+        if isinstance(result, bytes):
+            result = result.decode("utf-8")
+        lines = result.strip().split("\n")
+        lines = [line for line in lines if not line.startswith("@base ")]
+        merged_inner = "\n".join(lines) + "\n"
+
+        # Replace the old block content with the merged content
+        return content[:match.start(2)] + merged_inner + content[match.end(2):]
+
     def _commit_and_push_file(self, file_path: Path, message: str) -> bool:
         """Commit a single file change and push to remote.
 
@@ -1271,8 +1316,16 @@ class KanbanService:
                 continue
 
             if not dry_run:
-                block = self._serialize_as_turtle_block(missing)
-                new_content = self._insert_turtle_block(content, block)
+                # If file already has a turtle block, merge into it;
+                # otherwise insert a new one.
+                match = self._TURTLE_BLOCK_RE.search(content)
+                if match:
+                    new_content = self._merge_into_existing_block(
+                        content, match, missing,
+                    )
+                else:
+                    block = self._serialize_as_turtle_block(missing)
+                    new_content = self._insert_turtle_block(content, block)
                 item.file_path.write_text(new_content)
                 item.graph = self._parse_graph(new_content) or Graph()
 
@@ -1316,7 +1369,7 @@ class KanbanService:
         if hdd_type == "hypothesis":
             paper = frontmatter.get("paper")
             if paper:
-                paper_num = str(paper).replace("Paper", "")
+                paper_num = _normalize_paper_num(paper)
                 g.add((subject, _HYP.paper, _PAPER_NS[f"PAPER-{paper_num}"]))
             target = frontmatter.get("target")
             if target:
@@ -1336,7 +1389,7 @@ class KanbanService:
         elif hdd_type == "experiment":
             paper = frontmatter.get("paper")
             if paper:
-                paper_num = str(paper).replace("Paper", "")
+                paper_num = _normalize_paper_num(paper)
                 g.add((subject, _EXPR.paper, _PAPER_NS[f"PAPER-{paper_num}"]))
             hypotheses = frontmatter.get("hypotheses", [])
             if hypotheses:
