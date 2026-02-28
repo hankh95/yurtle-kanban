@@ -692,3 +692,95 @@ class TestIrregularPluralRouting:
         svc = KanbanService(config, tmp_path)
         path = svc._get_type_directory(WorkItemType.EXPERIMENT)
         assert "experiments" in str(path)
+
+
+class TestBoardAwareMove:
+    """CHORE-079: move command must respect per-board preset states and WIP limits.
+
+    When multi-board is configured with development (nautical) + research (hdd),
+    moving a research item should use the HDD preset's WIP limits, not the
+    development board's.
+    """
+
+    @pytest.fixture
+    def move_test_setup(self, tmp_path):
+        """Create a multi-board environment with items for move testing."""
+        config_path = tmp_path / ".kanban" / "config.yaml"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text("""
+version: "2.0"
+boards:
+  - name: development
+    preset: nautical
+    path: kanban-work/
+  - name: research
+    preset: hdd
+    path: research/
+default_board: development
+""")
+
+        (tmp_path / "kanban-work" / "expeditions").mkdir(parents=True)
+        (tmp_path / "research" / "experiments").mkdir(parents=True)
+
+        # Create a dev item
+        dev_item = tmp_path / "kanban-work" / "expeditions" / "EXP-001-Test.md"
+        dev_item.write_text("""---
+id: EXP-001
+title: "Dev Item"
+type: expedition
+status: backlog
+---
+# Dev Item
+""")
+
+        # Create a research item
+        research_item = tmp_path / "research" / "experiments" / "EXPR-200.md"
+        research_item.write_text("""---
+id: EXPR-200
+title: "Research Item"
+type: experiment
+status: backlog
+---
+# Research Item
+""")
+
+        config = KanbanConfig.load(config_path)
+        service = KanbanService(config, tmp_path)
+        return {"tmp_path": tmp_path, "config": config, "service": service}
+
+    def test_column_status_map_includes_hdd_aliases(self, move_test_setup):
+        """_get_column_status_map should include HDD aliases from theme status_mappings."""
+        from yurtle_kanban.models import WorkItemStatus
+
+        service = move_test_setup["service"]
+        col_map = service._get_column_status_map()
+
+        # HDD theme status_mappings: active→in_progress, complete→done, abandoned→blocked
+        assert col_map.get("active") == WorkItemStatus.IN_PROGRESS
+        assert col_map.get("complete") == WorkItemStatus.DONE
+        assert col_map.get("abandoned") == WorkItemStatus.BLOCKED
+        # draft→backlog was already in the hardcoded mappings
+        assert col_map.get("draft") == WorkItemStatus.BACKLOG
+
+    def test_move_research_item_uses_research_board_wip(self, move_test_setup):
+        """Moving a research item should check WIP on the research board, not dev."""
+        from yurtle_kanban.models import WorkItemStatus
+
+        service = move_test_setup["service"]
+
+        # Move EXPR-200 from backlog → ready (should succeed regardless of dev board WIP)
+        item = service.move_item(
+            "EXPR-200", WorkItemStatus.READY, commit=False, validate_workflow=False
+        )
+        assert item.status == WorkItemStatus.READY
+
+    def test_move_dev_item_still_uses_dev_board(self, move_test_setup):
+        """Dev items should still use the dev board for WIP checks."""
+        from yurtle_kanban.models import WorkItemStatus
+
+        service = move_test_setup["service"]
+
+        item = service.move_item(
+            "EXP-001", WorkItemStatus.READY, commit=False, validate_workflow=False
+        )
+        assert item.status == WorkItemStatus.READY

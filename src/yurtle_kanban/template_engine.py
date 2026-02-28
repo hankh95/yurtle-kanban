@@ -56,7 +56,8 @@ class TemplateEngine:
 
         # Substitute frontmatter id field
         if "id" in variables:
-            # Replace the id line in frontmatter (handles patterns like IDEA-R-XXX, H{paper}.{n}, etc.)
+            # Replace the id line in frontmatter
+            # (handles patterns like IDEA-R-XXX, H{paper}.{n}, etc.)
             content = re.sub(
                 r"^(id:\s*).+$",
                 rf"\g<1>{variables['id']}",

@@ -19,11 +19,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
+from rdflib import RDF, RDFS, Graph, Literal, Namespace, URIRef
 
 from .config import KanbanConfig
 from .hooks import HookContext, HookEngine, HookEvent
-
-from rdflib import RDF, RDFS, Graph, Literal, Namespace, URIRef
 
 if TYPE_CHECKING:
     from .config import BoardConfig
@@ -187,7 +186,10 @@ class KanbanService:
             # Parse resolution fields
             resolution = frontmatter.get("resolution")
             if resolution is not None:
-                valid_resolutions = {"completed", "superseded", "wont_do", "duplicate", "obsolete", "merged"}
+                valid_resolutions = {
+                    "completed", "superseded", "wont_do",
+                    "duplicate", "obsolete", "merged",
+                }
                 if resolution not in valid_resolutions:
                     logger.warning(
                         f"Unknown resolution '{resolution}' in {file_path}. "
@@ -482,14 +484,12 @@ class KanbanService:
         return sorted(columns, key=lambda c: c.order)
 
     def _get_column_status_map(self) -> dict[str, WorkItemStatus]:
-        """Get mapping from column IDs to WorkItemStatus for themed columns."""
-        # Default nautical theme mappings
-        mappings = {
-            "harbor": WorkItemStatus.BACKLOG,
-            "provisioning": WorkItemStatus.READY,
-            "underway": WorkItemStatus.IN_PROGRESS,
-            "approaching": WorkItemStatus.REVIEW,
-            "arrived": WorkItemStatus.DONE,
+        """Get mapping from column IDs to WorkItemStatus for themed columns.
+
+        Loads status_mappings from all configured board presets, then
+        falls back to hardcoded defaults for known themes.
+        """
+        mappings: dict[str, WorkItemStatus] = {
             # Standard software theme (identity mapping)
             "backlog": WorkItemStatus.BACKLOG,
             "ready": WorkItemStatus.READY,
@@ -497,6 +497,12 @@ class KanbanService:
             "review": WorkItemStatus.REVIEW,
             "done": WorkItemStatus.DONE,
             "blocked": WorkItemStatus.BLOCKED,
+            # Nautical theme
+            "harbor": WorkItemStatus.BACKLOG,
+            "provisioning": WorkItemStatus.READY,
+            "underway": WorkItemStatus.IN_PROGRESS,
+            "approaching": WorkItemStatus.REVIEW,
+            "arrived": WorkItemStatus.DONE,
             # Spec theme
             "draft": WorkItemStatus.BACKLOG,
             "proposed": WorkItemStatus.READY,
@@ -507,6 +513,24 @@ class KanbanService:
             "complete": WorkItemStatus.DONE,
             "abandoned": WorkItemStatus.BLOCKED,
         }
+
+        # Load status_mappings from all configured board presets
+        from .config import _load_builtin_theme
+
+        presets_seen: set[str] = set()
+        if self.config.is_multi_board:
+            for board_config in self.config.boards:
+                if board_config.preset in presets_seen:
+                    continue
+                presets_seen.add(board_config.preset)
+                theme = _load_builtin_theme(board_config.preset, self.repo_root)
+                if theme and "status_mappings" in theme:
+                    for alias, canonical in theme["status_mappings"].items():
+                        try:
+                            mappings[alias] = WorkItemStatus.from_string(canonical)
+                        except ValueError:
+                            pass
+
         return mappings
 
     def _get_columns_from_theme(self) -> list[Column]:
@@ -604,11 +628,11 @@ class KanbanService:
             return self.repo_root / type_path
 
         # Priority 3: Match scan_paths by type keyword
-        _IRREGULAR_PLURALS = {
+        irregular_plurals = {
             "hypothesis": "hypotheses",
             "literature": "literature",
         }
-        plural = _IRREGULAR_PLURALS.get(item_type.value, item_type.value + "s")
+        plural = irregular_plurals.get(item_type.value, item_type.value + "s")
         for scan_path in self.config.paths.scan_paths:
             if plural in scan_path.lower() or item_type.value in scan_path.lower():
                 return self.repo_root / scan_path
@@ -851,7 +875,10 @@ class KanbanService:
                     "item": item,
                     "id": current_id,
                     "pushed": False,
-                    "message": f"Created and committed {current_id}: {title} (no remote configured)",
+                    "message": (
+                        f"Created and committed {current_id}: "
+                        f"{title} (no remote configured)"
+                    ),
                 }
 
             push_result = subprocess.run(
@@ -1144,10 +1171,10 @@ class KanbanService:
             Tuple of (new_content, changed). changed is False if the triple
             already exists or no subject was found.
         """
-        BASE = URIRef("urn:yurtle:block")
+        base_uri = URIRef("urn:yurtle:block")
         g = Graph()
         try:
-            g.parse(data=turtle_content, format="turtle", publicID=str(BASE))
+            g.parse(data=turtle_content, format="turtle", publicID=str(base_uri))
         except Exception as e:
             logger.warning(f"Failed to parse turtle block for modification: {e}")
             return turtle_content, False
@@ -1172,7 +1199,7 @@ class KanbanService:
             g.bind(name, Namespace(uri))
 
         # Serialize with base to preserve <#ID> relative URIs
-        result = g.serialize(format="turtle", base=BASE)
+        result = g.serialize(format="turtle", base=base_uri)
         if isinstance(result, bytes):
             result = result.decode("utf-8")
 
@@ -1189,10 +1216,10 @@ class KanbanService:
         Parses the existing block with rdflib, adds the missing triples,
         serializes back, and replaces the block in place.
         """
-        BASE = URIRef("urn:yurtle:block")
+        base_uri = URIRef("urn:yurtle:block")
         g = Graph()
         try:
-            g.parse(data=match.group(2), format="turtle", publicID=str(BASE))
+            g.parse(data=match.group(2), format="turtle", publicID=str(base_uri))
         except Exception as e:
             logger.warning(f"Failed to parse existing block for merge: {e}")
             # Fall back to inserting a new block
@@ -1206,7 +1233,7 @@ class KanbanService:
         # Bind prefixes and serialize
         for name, uri in PREFIXES.items():
             g.bind(name, Namespace(uri))
-        result = g.serialize(format="turtle", base=BASE)
+        result = g.serialize(format="turtle", base=base_uri)
         if isinstance(result, bytes):
             result = result.decode("utf-8")
         lines = result.strip().split("\n")
@@ -1432,7 +1459,7 @@ class KanbanService:
 
         Works on a copy to avoid mutating the caller's graph.
         """
-        BASE = URIRef("urn:yurtle:block")
+        base_uri = URIRef("urn:yurtle:block")
 
         # Work on a copy to avoid mutating the input graph
         work = Graph() + graph
@@ -1441,7 +1468,7 @@ class KanbanService:
         for name, uri in PREFIXES.items():
             work.bind(name, Namespace(uri))
 
-        result = work.serialize(format="turtle", base=BASE)
+        result = work.serialize(format="turtle", base=base_uri)
         if isinstance(result, bytes):
             result = result.decode("utf-8")
 
@@ -1465,7 +1492,10 @@ class KanbanService:
             return content + "\n\n" + block + "\n"
 
         after_frontmatter = parts[2]
-        return parts[0] + "---" + parts[1] + "---\n\n" + block + "\n" + after_frontmatter.lstrip("\n")
+        return (
+            parts[0] + "---" + parts[1] + "---\n\n"
+            + block + "\n" + after_frontmatter.lstrip("\n")
+        )
 
     def allocate_next_id(
         self,
@@ -1660,13 +1690,22 @@ class KanbanService:
 
         # Check WIP limits (unless skipped)
         if not skip_wip_check:
-            board = self.get_board()
+            # Determine which board this item belongs to
+            board_name = None
+            if self.config.is_multi_board and item.file_path:
+                board_config = self.config.get_board_for_path(
+                    item.file_path, self.repo_root
+                )
+                if board_config:
+                    board_name = board_config.name
+            board = self.get_board(board_name=board_name)
             for col in board.columns:
                 if col.id == new_status.value:
                     current_count = len(board.get_items_by_status(new_status))
                     if col.wip_limit and current_count >= col.wip_limit:
                         raise ValueError(
-                            f"WIP limit reached for {col.name} ({current_count}/{col.wip_limit})"
+                            f"WIP limit reached for {col.name} on {board.name} "
+                            f"({current_count}/{col.wip_limit})"
                         )
 
         # Update item

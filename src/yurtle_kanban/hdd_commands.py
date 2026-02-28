@@ -15,7 +15,7 @@ from __future__ import annotations
 import click
 from rich.console import Console
 
-from .models import WorkItemStatus, WorkItemType
+from .models import WorkItemType
 from .template_engine import TemplateEngine
 
 console = Console()
@@ -338,11 +338,20 @@ def hypothesis():
 @hypothesis.command("create")
 @click.argument("statement")
 @click.option("--paper", "paper_num", required=True, type=int, help="Paper number (e.g., 130)")
-@click.option("--id", "hyp_id", default=None, help="Explicit ID (e.g., H130.1). Auto-allocates if omitted.")
+@click.option(
+    "--id", "hyp_id", default=None,
+    help="Explicit ID (e.g., H130.1). Auto-allocates if omitted.",
+)
 @click.option("--target", default=None, help="Target metric value (e.g., '>=50%')")
 @click.option("--source-idea", default=None, help="Source idea ID (e.g., IDEA-R-001)")
-@click.option("--measures", default=None, help="Comma-separated measure IDs (e.g., 'M-007,M-025')")
-@click.option("--literature", default=None, help="Comma-separated literature IDs (e.g., 'LIT-001,LIT-003')")
+@click.option(
+    "--measures", default=None,
+    help="Comma-separated measure IDs (e.g., 'M-007,M-025')",
+)
+@click.option(
+    "--literature", default=None,
+    help="Comma-separated literature IDs (e.g., 'LIT-001,LIT-003')",
+)
 @click.option("--priority", "-p", default="medium", help="Priority")
 @click.option("--push", is_flag=True, help="Atomic: create, commit, and push")
 def hypothesis_create(
@@ -451,7 +460,10 @@ def experiment():
 @click.option("--measures", default=None, help="Comma-separated measure IDs (e.g., 'M-007,M-025')")
 @click.option("--priority", "-p", default="medium", help="Priority")
 @click.option("--push", is_flag=True, help="Atomic: create, commit, and push")
-def experiment_create(expr_id: str, hyp_id: str, title: str, measures: str | None, priority: str, push: bool):
+def experiment_create(
+    expr_id: str, hyp_id: str, title: str,
+    measures: str | None, priority: str, push: bool,
+):
     """Create a new experiment.
 
     EXPR_ID is the experiment ID (e.g., EXPR-130).
@@ -532,8 +544,14 @@ def measure():
 @measure.command("create")
 @click.argument("title")
 @click.option("--unit", required=True, help="Unit of measurement (e.g., 'percent', 'count', 'ms')")
-@click.option("--category", required=True, help="Category (e.g., 'accuracy', 'performance', 'coverage')")
-@click.option("--id", "measure_id", default=None, help="Explicit ID (e.g., M-042). Auto-allocates if omitted.")
+@click.option(
+    "--category", required=True,
+    help="Category (e.g., 'accuracy', 'performance', 'coverage')",
+)
+@click.option(
+    "--id", "measure_id", default=None,
+    help="Explicit ID (e.g., M-042). Auto-allocates if omitted.",
+)
 @click.option("--priority", "-p", default="medium", help="Priority")
 @click.option("--push", is_flag=True, help="Atomic: create, commit, and push")
 def measure_create(
