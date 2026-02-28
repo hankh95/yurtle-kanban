@@ -529,6 +529,18 @@ jobs:
 
 ## Changelog
 
+### v1.13.0 (2026-02-28)
+
+**Graph-native backfill and robustness improvements.**
+
+#### Added
+- **`hdd backfill` command** — Scan all HDD files, build expected RDF triples from frontmatter, diff against existing graph, and insert only missing triples as a fenced turtle block. Supports `--dry-run` for preview. Idempotent at the triple level (#33)
+- **Partial block consolidation** — When backfilling a file that already has a turtle block, missing triples are merged into the existing block instead of appending a second one (#34)
+
+#### Fixed
+- **Paper field normalization** — `_normalize_paper_num()` uses regex to handle `130`, `Paper130`, `paper130`, `PAPER130` correctly. Replaces fragile `str.replace("Paper", "")` (#34)
+- **`__init__.py` version sync** — Now matches `pyproject.toml` (was stuck at 1.11.0 since v1.12.0 release)
+
 ### v1.12.0 (2026-02-28)
 
 **Graph-native knowledge blocks and research tooling.**
