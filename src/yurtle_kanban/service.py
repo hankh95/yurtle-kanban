@@ -23,7 +23,7 @@ import yaml
 from .config import KanbanConfig
 from .hooks import HookContext, HookEngine, HookEvent
 
-from rdflib import Graph, Namespace, URIRef
+from rdflib import RDF, RDFS, Graph, Literal, Namespace, URIRef
 
 if TYPE_CHECKING:
     from .config import BoardConfig
@@ -32,6 +32,30 @@ from .turtle_builder import PREFIXES
 from .workflow import WorkflowConfig, WorkflowParser
 
 logger = logging.getLogger("yurtle-kanban")
+
+# HDD namespace objects (derived from turtle_builder.PREFIXES, single source of truth)
+_HYP = Namespace(PREFIXES["hyp"])
+_PAPER_NS = Namespace(PREFIXES["paper"])
+_EXPR = Namespace(PREFIXES["expr"])
+_MEASURE = Namespace(PREFIXES["measure"])
+_IDEA = Namespace(PREFIXES["idea"])
+_LIT = Namespace(PREFIXES["lit"])
+
+# HDD type aliases for backfill (normalize variant names to canonical types)
+_TYPE_ALIASES: dict[str, str] = {"secondary-hypothesis": "hypothesis"}
+
+# HDD types eligible for turtle block backfill
+_BACKFILL_TYPES = frozenset({"idea", "literature", "paper", "hypothesis", "experiment", "measure"})
+
+# RDF class URIs for each HDD type
+_HDD_TYPE_CLASSES: dict[str, URIRef] = {
+    "idea": _IDEA.Idea,
+    "literature": _LIT.Literature,
+    "paper": _PAPER_NS.Paper,
+    "hypothesis": _HYP.Hypothesis,
+    "experiment": _EXPR.Experiment,
+    "measure": _MEASURE.Measure,
+}
 
 
 class KanbanService:
@@ -1179,6 +1203,208 @@ class KanbanService:
                 return False
 
         return True
+
+    # ------------------------------------------------------------------
+    # Backfill: add turtle blocks to HDD files that lack them
+    # ------------------------------------------------------------------
+
+    def backfill_turtle_blocks(
+        self, dry_run: bool = False
+    ) -> list[dict[str, Any]]:
+        """Scan HDD items and add missing turtle knowledge blocks.
+
+        Uses graph diffing: builds an "expected" rdflib Graph from each file's
+        YAML frontmatter, compares against the file's existing graph (parsed
+        by yurtle-rdflib), and serializes only the missing triples as a new
+        fenced turtle block.
+
+        Args:
+            dry_run: If True, report what would change without modifying files.
+
+        Returns:
+            List of result dicts with keys: path, id, type, action,
+            triples_added.
+        """
+        results: list[dict[str, Any]] = []
+        for item in self.get_items():
+            content = item.file_path.read_text()
+            frontmatter = self._parse_frontmatter(content)
+            if not frontmatter:
+                continue
+
+            raw_type = frontmatter.get("type", "")
+            hdd_type = _TYPE_ALIASES.get(raw_type, raw_type)
+            if hdd_type not in _BACKFILL_TYPES:
+                continue
+
+            # Build expected graph from frontmatter fields
+            want = self._build_expected_graph(hdd_type, frontmatter)
+            if len(want) == 0:
+                continue
+
+            # Parse existing graph (frontmatter TTL + fenced blocks)
+            have_raw = self._parse_graph(content) or Graph()
+
+            # Normalize subjects: parse_yurtle resolves <#ID> relative to
+            # the file path (file:///.../#ID), but _build_expected_graph
+            # uses the synthetic base (urn:yurtle:block#ID).  Remap any
+            # subject whose fragment matches the item ID so the diff works.
+            item_id = str(frontmatter.get("id", ""))
+            target_subject = URIRef(f"urn:yurtle:block#{item_id}")
+            have = Graph()
+            for s, p, o in have_raw:
+                if str(s).endswith(f"#{item_id}"):
+                    have.add((target_subject, p, o))
+                else:
+                    have.add((s, p, o))
+
+            # Diff: triples we want but don't have
+            missing = want - have
+            if len(missing) == 0:
+                results.append({
+                    "path": str(item.file_path),
+                    "id": item.id,
+                    "type": hdd_type,
+                    "action": "up_to_date",
+                    "triples_added": 0,
+                })
+                continue
+
+            if not dry_run:
+                block = self._serialize_as_turtle_block(missing)
+                new_content = self._insert_turtle_block(content, block)
+                item.file_path.write_text(new_content)
+                item.graph = self._parse_graph(new_content) or Graph()
+
+            results.append({
+                "path": str(item.file_path),
+                "id": item.id,
+                "type": hdd_type,
+                "action": "backfill" if not dry_run else "would_backfill",
+                "triples_added": len(missing),
+            })
+
+        return results
+
+    def _build_expected_graph(
+        self, hdd_type: str, frontmatter: dict[str, Any]
+    ) -> Graph:
+        """Build an rdflib Graph of expected triples from frontmatter fields.
+
+        Maps YAML frontmatter relationship fields to the RDF triples that
+        TurtleBlockBuilder would generate for a new item of this type.
+        """
+        g = Graph()
+        item_id = str(frontmatter.get("id", ""))
+        if not item_id:
+            return g
+
+        # Use synthetic base URI for relative <#ID> subjects
+        subject = URIRef(f"urn:yurtle:block#{item_id}")
+        title = frontmatter.get("title", "")
+
+        # Type triple (all HDD types)
+        rdf_class = _HDD_TYPE_CLASSES.get(hdd_type)
+        if rdf_class:
+            g.add((subject, RDF.type, rdf_class))
+
+        # Label (all types)
+        if title:
+            g.add((subject, RDFS.label, Literal(title)))
+
+        # Type-specific relationship triples
+        if hdd_type == "hypothesis":
+            paper = frontmatter.get("paper")
+            if paper:
+                paper_num = str(paper).replace("Paper", "")
+                g.add((subject, _HYP.paper, _PAPER_NS[f"PAPER-{paper_num}"]))
+            target = frontmatter.get("target")
+            if target:
+                g.add((subject, _HYP.target, Literal(str(target))))
+            measures = frontmatter.get("measures")
+            if measures:
+                for m in (measures if isinstance(measures, list) else [measures]):
+                    g.add((subject, _HYP.measuredBy, _MEASURE[str(m)]))
+            source_idea = frontmatter.get("source_idea")
+            if source_idea:
+                g.add((subject, _HYP.sourceIdea, _IDEA[str(source_idea)]))
+            literature = frontmatter.get("literature")
+            if literature:
+                for lit in (literature if isinstance(literature, list) else [literature]):
+                    g.add((subject, _HYP.informedBy, _LIT[str(lit)]))
+
+        elif hdd_type == "experiment":
+            paper = frontmatter.get("paper")
+            if paper:
+                paper_num = str(paper).replace("Paper", "")
+                g.add((subject, _EXPR.paper, _PAPER_NS[f"PAPER-{paper_num}"]))
+            hypotheses = frontmatter.get("hypotheses", [])
+            if hypotheses:
+                first_hyp = hypotheses[0] if isinstance(hypotheses, list) else hypotheses
+                g.add((subject, _EXPR.hypothesis, _HYP[str(first_hyp)]))
+            measures = frontmatter.get("measures")
+            if measures:
+                for m in (measures if isinstance(measures, list) else [measures]):
+                    g.add((subject, _EXPR.measure, _MEASURE[str(m)]))
+
+        elif hdd_type == "measure":
+            unit = frontmatter.get("unit")
+            if unit:
+                g.add((subject, _MEASURE.unit, Literal(str(unit))))
+            category = frontmatter.get("category")
+            if category:
+                g.add((subject, _MEASURE.category, Literal(str(category))))
+
+        elif hdd_type == "literature":
+            source_idea = frontmatter.get("source_idea")
+            if source_idea:
+                g.add((subject, _LIT.explores, _IDEA[str(source_idea)]))
+
+        return g
+
+    def _serialize_as_turtle_block(self, graph: Graph) -> str:
+        """Serialize an rdflib Graph as a fenced ```turtle block.
+
+        Uses rdflib's Turtle serializer with HDD prefix bindings.
+        Same pattern as _modify_turtle_block(): synthetic base URI,
+        strip @base declaration from output.
+
+        Works on a copy to avoid mutating the caller's graph.
+        """
+        BASE = URIRef("urn:yurtle:block")
+
+        # Work on a copy to avoid mutating the input graph
+        work = Graph() + graph
+
+        # Bind all HDD prefixes for clean serialization
+        for name, uri in PREFIXES.items():
+            work.bind(name, Namespace(uri))
+
+        result = work.serialize(format="turtle", base=BASE)
+        if isinstance(result, bytes):
+            result = result.decode("utf-8")
+
+        # Strip @base declaration (not used in our blocks)
+        lines = result.strip().split("\n")
+        lines = [line for line in lines if not line.startswith("@base ")]
+        inner = "\n".join(lines)
+
+        return f"```turtle\n{inner}\n```"
+
+    def _insert_turtle_block(self, content: str, block: str) -> str:
+        """Insert a fenced turtle block after YAML frontmatter.
+
+        Places the block between the closing --- and the first # heading.
+        """
+        if not content.startswith("---"):
+            return content + "\n\n" + block + "\n"
+
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            return content + "\n\n" + block + "\n"
+
+        after_frontmatter = parts[2]
+        return parts[0] + "---" + parts[1] + "---\n\n" + block + "\n" + after_frontmatter.lstrip("\n")
 
     def allocate_next_id(
         self,
