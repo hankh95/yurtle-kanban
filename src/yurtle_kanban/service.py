@@ -502,6 +502,10 @@ class KanbanService:
             "proposed": WorkItemStatus.READY,
             "implementing": WorkItemStatus.IN_PROGRESS,
             "accepted": WorkItemStatus.DONE,
+            # HDD theme (Hypothesis-Driven Development)
+            "active": WorkItemStatus.IN_PROGRESS,
+            "complete": WorkItemStatus.DONE,
+            "abandoned": WorkItemStatus.BLOCKED,
         }
         return mappings
 
