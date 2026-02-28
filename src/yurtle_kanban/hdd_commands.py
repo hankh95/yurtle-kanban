@@ -36,6 +36,27 @@ def _get_engine() -> TemplateEngine:
     return TemplateEngine(_get_templates_dir())
 
 
+def _update_parent(
+    service,
+    parent_id: str,
+    child_type: str,
+    child_id: str,
+    push: bool,
+) -> None:
+    """Best-effort update of parent's turtle block with inverse reference.
+
+    Silent on failure — the child creation is the primary operation.
+    """
+    try:
+        updated = service.update_parent_turtle_block(
+            parent_id, child_type, child_id, push=push,
+        )
+        if updated:
+            console.print(f"  [dim]Updated {parent_id} with inverse reference[/dim]")
+    except Exception as e:
+        console.print(f"  [yellow]Warning: could not update {parent_id}: {e}[/yellow]")
+
+
 # ---------------------------------------------------------------------------
 # idea
 # ---------------------------------------------------------------------------
@@ -158,6 +179,8 @@ def literature_create(title: str, source_idea: str | None, priority: str, push: 
             pushed = " and pushed" if result.get("pushed") else ""
             console.print(f"[green]Created{pushed} {result['id']}: {title}[/green]")
             console.print(f"  File: {result['item'].file_path}")
+            if source_idea:
+                _update_parent(service, source_idea, "literature", result["id"], push=True)
         else:
             raise click.ClickException(f"Failed: {result['message']}")
     else:
@@ -170,6 +193,8 @@ def literature_create(title: str, source_idea: str | None, priority: str, push: 
         )
         console.print(f"[green]Created {item.id}: {title}[/green]")
         console.print(f"  File: {item.file_path}")
+        if source_idea:
+            _update_parent(service, source_idea, "literature", item.id, push=False)
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +365,7 @@ def hypothesis_create(
             pushed = " and pushed" if result.get("pushed") else ""
             console.print(f"[green]Created{pushed} {result['id']}: {statement}[/green]")
             console.print(f"  File: {result['item'].file_path}")
+            _update_parent(service, f"PAPER-{paper_num}", "hypothesis", result["id"], push=True)
         else:
             raise click.ClickException(f"Failed: {result['message']}")
     else:
@@ -352,6 +378,7 @@ def hypothesis_create(
         )
         console.print(f"[green]Created {item.id}: {statement}[/green]")
         console.print(f"  File: {item.file_path}")
+        _update_parent(service, f"PAPER-{paper_num}", "hypothesis", item.id, push=False)
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +450,7 @@ def experiment_create(expr_id: str, hyp_id: str, title: str, measures: str | Non
             pushed = " and pushed" if result.get("pushed") else ""
             console.print(f"[green]Created{pushed} {result['id']}: {title}[/green]")
             console.print(f"  File: {result['item'].file_path}")
+            _update_parent(service, hyp_id, "experiment", result["id"], push=True)
         else:
             raise click.ClickException(f"Failed: {result['message']}")
     else:
@@ -435,6 +463,7 @@ def experiment_create(expr_id: str, hyp_id: str, title: str, measures: str | Non
         )
         console.print(f"[green]Created {item.id}: {title}[/green]")
         console.print(f"  File: {item.file_path}")
+        _update_parent(service, hyp_id, "experiment", item.id, push=False)
 
 
 # ---------------------------------------------------------------------------

@@ -739,17 +739,6 @@ class TestWorkItemGraph:
         assert any("M-007" in m for m in measures)
         assert any("M-025" in m for m in measures)
 
-    def test_graph_none_without_yurtle_rdflib(self, temp_repo, nautical_config):
-        """WorkItem.graph should be None if yurtle-rdflib unavailable."""
-        svc = KanbanService(nautical_config, temp_repo)
-        # Simulate yurtle-rdflib not being installed
-        svc._has_yurtle_rdflib = False
-        svc.create_item(WorkItemType.EXPEDITION, "No RDFlib")
-        svc.scan()
-        reloaded = svc.get_item("EXP-001")
-        assert reloaded is not None
-        assert reloaded.graph is None
-
     def test_graph_empty_for_yaml_only(self, temp_repo, nautical_config):
         """YAML-only files should still have a graph (from frontmatter conversion)."""
         svc = KanbanService(nautical_config, temp_repo)
@@ -774,3 +763,331 @@ class TestWorkItemGraph:
         # Graph should still exist with frontmatter triples (malformed block skipped)
         assert reloaded.graph is not None
         assert len(reloaded.graph) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Parent Turtle Block Auto-Update (EXP-1026)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def hdd_repo(tmp_path):
+    """Create a minimal git repo with HDD directory structure."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=tmp_path, capture_output=True, check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=tmp_path, capture_output=True, check=True,
+    )
+    (tmp_path / ".kanban").mkdir()
+    (tmp_path / "research" / "ideas").mkdir(parents=True)
+    (tmp_path / "research" / "literature").mkdir(parents=True)
+    (tmp_path / "research" / "papers").mkdir(parents=True)
+    (tmp_path / "research" / "hypotheses").mkdir(parents=True)
+    (tmp_path / "research" / "experiments").mkdir(parents=True)
+    (tmp_path / "research" / "measures").mkdir(parents=True)
+    return tmp_path
+
+
+@pytest.fixture
+def hdd_svc_config(hdd_repo):
+    """HDD config for parent update tests."""
+    config = KanbanConfig(
+        theme="hdd",
+        paths=PathConfig(
+            root="research/",
+            scan_paths=[
+                "research/ideas/",
+                "research/literature/",
+                "research/papers/",
+                "research/hypotheses/",
+                "research/experiments/",
+                "research/measures/",
+            ],
+        ),
+    )
+    config.save(hdd_repo / ".kanban" / "config.yaml")
+    return config
+
+
+def _paper_turtle_block() -> str:
+    """Minimal paper turtle block for testing."""
+    return (
+        '@prefix paper: <https://nusy.dev/paper/> .\n'
+        '@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n'
+        '\n'
+        '<#PAPER-130> a paper:Paper ;\n'
+        '    rdfs:label "Brain Architecture" .\n'
+    )
+
+
+def _hypothesis_turtle_block() -> str:
+    """Minimal hypothesis turtle block for testing."""
+    return (
+        '@prefix hyp: <https://nusy.dev/hypothesis/> .\n'
+        '@prefix paper: <https://nusy.dev/paper/> .\n'
+        '@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n'
+        '\n'
+        '<#H130.1> a hyp:Hypothesis ;\n'
+        '    rdfs:label "Accuracy improves" ;\n'
+        '    hyp:paper paper:PAPER-130 .\n'
+    )
+
+
+def _idea_turtle_block() -> str:
+    """Minimal idea turtle block for testing."""
+    return (
+        '@prefix idea: <https://nusy.dev/idea/> .\n'
+        '@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n'
+        '\n'
+        '<#IDEA-R-010> a idea:Idea ;\n'
+        '    rdfs:label "Test Idea" .\n'
+    )
+
+
+class TestModifyTurtleBlock:
+    """Tests for KanbanService._modify_turtle_block()."""
+
+    def _svc(self, hdd_repo, hdd_svc_config):
+        return KanbanService(hdd_svc_config, hdd_repo)
+
+    def test_add_first_child(self, hdd_repo, hdd_svc_config):
+        """Adding a new predicate should produce a block with the triple."""
+        from rdflib import Namespace
+
+        svc = self._svc(hdd_repo, hdd_svc_config)
+        paper_ns = Namespace("https://nusy.dev/paper/")
+        hyp_ns = Namespace("https://nusy.dev/hypothesis/")
+
+        new_content, changed = svc._modify_turtle_block(
+            _paper_turtle_block(),
+            paper_ns["hasHypothesis"],
+            hyp_ns["H130.1"],
+        )
+        assert changed is True
+        assert "hasHypothesis" in new_content
+        assert "H130.1" in new_content
+
+    def test_add_second_child(self, hdd_repo, hdd_svc_config):
+        """Adding a second child — both URIs should be present."""
+        from rdflib import Namespace
+
+        svc = self._svc(hdd_repo, hdd_svc_config)
+        paper_ns = Namespace("https://nusy.dev/paper/")
+        hyp_ns = Namespace("https://nusy.dev/hypothesis/")
+
+        content1, _ = svc._modify_turtle_block(
+            _paper_turtle_block(),
+            paper_ns["hasHypothesis"],
+            hyp_ns["H130.1"],
+        )
+        content2, changed = svc._modify_turtle_block(
+            content1,
+            paper_ns["hasHypothesis"],
+            hyp_ns["H130.2"],
+        )
+        assert changed is True
+        assert "H130.1" in content2
+        assert "H130.2" in content2
+
+    def test_idempotent(self, hdd_repo, hdd_svc_config):
+        """Adding the same child twice should return changed=False."""
+        from rdflib import Namespace
+
+        svc = self._svc(hdd_repo, hdd_svc_config)
+        paper_ns = Namespace("https://nusy.dev/paper/")
+        hyp_ns = Namespace("https://nusy.dev/hypothesis/")
+
+        content1, _ = svc._modify_turtle_block(
+            _paper_turtle_block(),
+            paper_ns["hasHypothesis"],
+            hyp_ns["H130.1"],
+        )
+        _, changed = svc._modify_turtle_block(
+            content1,
+            paper_ns["hasHypothesis"],
+            hyp_ns["H130.1"],
+        )
+        assert changed is False
+
+    def test_existing_triples_preserved(self, hdd_repo, hdd_svc_config):
+        """Original triples should survive modification."""
+        from rdflib import Graph, Namespace
+
+        svc = self._svc(hdd_repo, hdd_svc_config)
+        paper_ns = Namespace("https://nusy.dev/paper/")
+        hyp_ns = Namespace("https://nusy.dev/hypothesis/")
+
+        new_content, _ = svc._modify_turtle_block(
+            _paper_turtle_block(),
+            paper_ns["hasHypothesis"],
+            hyp_ns["H130.1"],
+        )
+        # Parse the result and verify original triples
+        g = Graph()
+        g.parse(data=new_content, format="turtle", publicID="urn:yurtle:block")
+        from rdflib.namespace import RDFS
+        labels = list(g.objects(predicate=RDFS.label))
+        assert any("Brain Architecture" in str(label) for label in labels)
+
+    def test_prefixes_bound(self, hdd_repo, hdd_svc_config):
+        """Child prefix should appear in output prefix declarations."""
+        from rdflib import Namespace
+
+        svc = self._svc(hdd_repo, hdd_svc_config)
+        paper_ns = Namespace("https://nusy.dev/paper/")
+        hyp_ns = Namespace("https://nusy.dev/hypothesis/")
+
+        new_content, _ = svc._modify_turtle_block(
+            _paper_turtle_block(),
+            paper_ns["hasHypothesis"],
+            hyp_ns["H130.1"],
+        )
+        assert "@prefix hyp:" in new_content
+
+    def test_empty_block(self, hdd_repo, hdd_svc_config):
+        """Empty turtle content should return unchanged."""
+        from rdflib import Namespace
+
+        svc = self._svc(hdd_repo, hdd_svc_config)
+        paper_ns = Namespace("https://nusy.dev/paper/")
+        hyp_ns = Namespace("https://nusy.dev/hypothesis/")
+
+        _, changed = svc._modify_turtle_block(
+            "",
+            paper_ns["hasHypothesis"],
+            hyp_ns["H130.1"],
+        )
+        assert changed is False
+
+    def test_no_base_in_output(self, hdd_repo, hdd_svc_config):
+        """Output should not contain @base declaration."""
+        from rdflib import Namespace
+
+        svc = self._svc(hdd_repo, hdd_svc_config)
+        paper_ns = Namespace("https://nusy.dev/paper/")
+        hyp_ns = Namespace("https://nusy.dev/hypothesis/")
+
+        new_content, _ = svc._modify_turtle_block(
+            _paper_turtle_block(),
+            paper_ns["hasHypothesis"],
+            hyp_ns["H130.1"],
+        )
+        assert "@base" not in new_content
+
+    def test_hypothesis_gets_experiment(self, hdd_repo, hdd_svc_config):
+        """Adding hasExperiment to a hypothesis block."""
+        from rdflib import Namespace
+
+        svc = self._svc(hdd_repo, hdd_svc_config)
+        hyp_ns = Namespace("https://nusy.dev/hypothesis/")
+        expr_ns = Namespace("https://nusy.dev/experiment/")
+
+        new_content, changed = svc._modify_turtle_block(
+            _hypothesis_turtle_block(),
+            hyp_ns["hasExperiment"],
+            expr_ns["EXPR-130"],
+        )
+        assert changed is True
+        assert "hasExperiment" in new_content
+        assert "EXPR-130" in new_content
+        # Original paper reference should still be there
+        assert "PAPER-130" in new_content
+
+
+class TestUpdateParentTurtleBlock:
+    """Tests for KanbanService.update_parent_turtle_block()."""
+
+    def _create_paper_file(self, hdd_repo):
+        """Create a PAPER-130 file with a turtle block."""
+        papers_dir = hdd_repo / "research" / "papers"
+        paper_file = papers_dir / "PAPER-130-Brain-Architecture.md"
+        paper_file.write_text(
+            "---\n"
+            "id: PAPER-130\n"
+            'title: "Brain Architecture"\n'
+            "type: paper\n"
+            "status: draft\n"
+            "created: 2026-01-01\n"
+            "tags: []\n"
+            "---\n"
+            "\n"
+            "# PAPER-130: Brain Architecture\n"
+            "\n"
+            "```turtle\n"
+            + _paper_turtle_block()
+            + "```\n"
+            "\n"
+            "## Content\n"
+        )
+        return paper_file
+
+    def test_nonexistent_parent(self, hdd_repo, hdd_svc_config):
+        """Updating a non-existent parent returns False."""
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        result = svc.update_parent_turtle_block("PAPER-999", "hypothesis", "H999.1")
+        assert result is False
+
+    def test_parent_without_turtle_block(self, hdd_repo, hdd_svc_config):
+        """Parent file without turtle block returns False."""
+        papers_dir = hdd_repo / "research" / "papers"
+        paper_file = papers_dir / "PAPER-130-No-Block.md"
+        paper_file.write_text(
+            "---\n"
+            "id: PAPER-130\n"
+            'title: "No Block"\n'
+            "type: paper\n"
+            "status: draft\n"
+            "created: 2026-01-01\n"
+            "tags: []\n"
+            "---\n"
+            "\n"
+            "# PAPER-130: No Block\n"
+            "\n"
+            "No turtle block here.\n"
+        )
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+        result = svc.update_parent_turtle_block("PAPER-130", "hypothesis", "H130.1")
+        assert result is False
+
+    def test_hypothesis_updates_paper_file(self, hdd_repo, hdd_svc_config):
+        """Creating a hypothesis should add paper:hasHypothesis to paper file."""
+        self._create_paper_file(hdd_repo)
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        result = svc.update_parent_turtle_block("PAPER-130", "hypothesis", "H130.1")
+        assert result is True
+
+        content = (hdd_repo / "research" / "papers" / "PAPER-130-Brain-Architecture.md").read_text()
+        assert "hasHypothesis" in content
+        assert "H130.1" in content
+
+    def test_idempotent_file_update(self, hdd_repo, hdd_svc_config):
+        """Updating the same parent with same child twice returns False on second call."""
+        self._create_paper_file(hdd_repo)
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        assert svc.update_parent_turtle_block("PAPER-130", "hypothesis", "H130.1") is True
+        svc.scan()
+        assert svc.update_parent_turtle_block("PAPER-130", "hypothesis", "H130.1") is False
+
+    def test_markdown_content_preserved(self, hdd_repo, hdd_svc_config):
+        """Markdown content outside the turtle block should be preserved."""
+        self._create_paper_file(hdd_repo)
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        svc.update_parent_turtle_block("PAPER-130", "hypothesis", "H130.1")
+
+        content = (hdd_repo / "research" / "papers" / "PAPER-130-Brain-Architecture.md").read_text()
+        assert "# PAPER-130: Brain Architecture" in content
+        assert "## Content" in content
+        assert content.startswith("---\n")

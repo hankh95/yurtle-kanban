@@ -23,10 +23,16 @@ Usage:
 
 __version__ = "1.11.0"
 
-# Register yurtle_rdflib plugin with rdflib (enables format="yurtle" parsing).
-# This must be imported before any rdflib Graph.parse() calls with format="yurtle".
-# Both rdflib and yurtle-rdflib are required dependencies — fail fast if missing.
-import yurtle_rdflib  # noqa: F401
+# yurtle-kanban is a graph-native product — rdflib + yurtle-rdflib are required.
+# Register the yurtle_rdflib plugin before any Graph.parse(format="yurtle") calls.
+try:
+    import yurtle_rdflib  # noqa: F401
+except ImportError as e:
+    raise ImportError(
+        "yurtle-kanban is a graph-native product — please install rdflib and "
+        "yurtle-rdflib, or I'll stay KAN'Tban instead of kanban!\n\n"
+        "  pip install rdflib yurtle-rdflib\n"
+    ) from e
 
 from yurtle_kanban.config import KanbanConfig
 from yurtle_kanban.hooks import HookContext, HookEngine, HookEvent
