@@ -1091,3 +1091,239 @@ class TestUpdateParentTurtleBlock:
         assert "# PAPER-130: Brain Architecture" in content
         assert "## Content" in content
         assert content.startswith("---\n")
+
+
+# ---------------------------------------------------------------------------
+# TestBuildExpectedGraph
+# ---------------------------------------------------------------------------
+
+
+class TestBuildExpectedGraph:
+    """Tests for _build_expected_graph — frontmatter → rdflib Graph."""
+
+    def test_idea_graph(self, hdd_repo, hdd_svc_config):
+        """Idea frontmatter produces idea:Idea type + rdfs:label triples."""
+        from rdflib import RDF, RDFS, Literal
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        fm = {"id": "IDEA-R-001", "title": "Test Idea", "type": "idea"}
+        g = svc._build_expected_graph("idea", fm)
+        assert len(g) == 2
+        subjects = list(g.subjects())
+        assert any("IDEA-R-001" in str(s) for s in subjects)
+        assert any(str(o) == "Test Idea" for _, _, o in g.triples((None, RDFS.label, None)))
+
+    def test_hypothesis_with_paper(self, hdd_repo, hdd_svc_config):
+        """Hypothesis with paper field produces hyp:paper triple."""
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        fm = {"id": "H130.1", "title": "Test Hyp", "type": "hypothesis", "paper": "Paper130", "target": ">=85%"}
+        g = svc._build_expected_graph("hypothesis", fm)
+        # type + label + paper + target = 4 triples
+        assert len(g) == 4
+        assert any("PAPER-130" in str(o) for _, _, o in g)
+        assert any(">=85%" in str(o) for _, _, o in g)
+
+    def test_experiment_with_measures(self, hdd_repo, hdd_svc_config):
+        """Experiment with measures list produces expr:measure triples."""
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        fm = {
+            "id": "EXPR-103", "title": "Test Exp", "type": "experiment",
+            "paper": "Paper103", "hypotheses": ["H103.1", "H103.2"],
+            "measures": ["M-002", "M-013"],
+        }
+        g = svc._build_expected_graph("experiment", fm)
+        # type + label + paper + hypothesis(first) + 2 measures = 6 triples
+        assert len(g) == 6
+        assert any("M-002" in str(o) for _, _, o in g)
+        assert any("M-013" in str(o) for _, _, o in g)
+
+    def test_secondary_hypothesis_alias(self, hdd_repo, hdd_svc_config):
+        """secondary-hypothesis type is handled via _TYPE_ALIASES externally."""
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        fm = {"id": "H9.1", "title": "Accuracy Equivalence", "type": "secondary-hypothesis"}
+        # Caller normalizes type; _build_expected_graph receives "hypothesis"
+        g = svc._build_expected_graph("hypothesis", fm)
+        assert len(g) == 2  # type + label
+        assert any("Hypothesis" in str(o) for _, _, o in g)
+
+    def test_minimal_frontmatter(self, hdd_repo, hdd_svc_config):
+        """Frontmatter with only id (no title) produces just the type triple."""
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        fm = {"id": "IDEA-R-099", "type": "idea"}
+        g = svc._build_expected_graph("idea", fm)
+        assert len(g) == 1  # just the type triple
+
+    def test_measure_graph(self, hdd_repo, hdd_svc_config):
+        """Measure with unit and category produces measure triples."""
+        from rdflib import Literal
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        fm = {"id": "M-007", "title": "Accuracy", "type": "measure", "unit": "percent", "category": "accuracy"}
+        g = svc._build_expected_graph("measure", fm)
+        # type + label + unit + category = 4 triples
+        assert len(g) == 4
+        assert any(str(o) == "percent" for _, _, o in g)
+        assert any(str(o) == "accuracy" for _, _, o in g)
+
+
+# ---------------------------------------------------------------------------
+# TestSerializeAsTurtleBlock
+# ---------------------------------------------------------------------------
+
+
+class TestSerializeAsTurtleBlock:
+    """Tests for _serialize_as_turtle_block — rdflib Graph → fenced block."""
+
+    def test_fenced_output(self, hdd_repo, hdd_svc_config):
+        """Output is wrapped in ```turtle fences."""
+        from rdflib import RDF, RDFS, Graph, Literal, Namespace, URIRef
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        g = Graph()
+        idea_ns = Namespace("https://nusy.dev/idea/")
+        subject = URIRef("urn:yurtle:block#IDEA-R-001")
+        g.add((subject, RDF.type, idea_ns.Idea))
+        g.add((subject, RDFS.label, Literal("Test")))
+        block = svc._serialize_as_turtle_block(g)
+        assert block.startswith("```turtle\n")
+        assert block.endswith("\n```")
+
+    def test_prefixes_bound(self, hdd_repo, hdd_svc_config):
+        """HDD prefixes appear in serialized output."""
+        from rdflib import RDF, Graph, Namespace, URIRef
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        g = Graph()
+        idea_ns = Namespace("https://nusy.dev/idea/")
+        subject = URIRef("urn:yurtle:block#IDEA-R-001")
+        g.add((subject, RDF.type, idea_ns.Idea))
+        block = svc._serialize_as_turtle_block(g)
+        assert "@prefix idea:" in block
+
+
+# ---------------------------------------------------------------------------
+# TestBackfillTurtleBlocks
+# ---------------------------------------------------------------------------
+
+
+class TestBackfillTurtleBlocks:
+    """Tests for backfill_turtle_blocks — graph-native backfill."""
+
+    def _write_idea_file(self, repo, idea_id, title):
+        """Create an idea file without a turtle block."""
+        fp = repo / "research" / "ideas" / f"{idea_id}-test.md"
+        fp.write_text(
+            f"---\nid: {idea_id}\ntitle: \"{title}\"\ntype: idea\nstatus: captured\n"
+            f"created: 2026-01-01\n---\n\n# {idea_id}: {title}\n\nContent here.\n"
+        )
+        return fp
+
+    def _write_idea_file_with_block(self, repo, idea_id, title):
+        """Create an idea file WITH a turtle block."""
+        fp = repo / "research" / "ideas" / f"{idea_id}-test.md"
+        fp.write_text(
+            f"---\nid: {idea_id}\ntitle: \"{title}\"\ntype: idea\nstatus: captured\n"
+            f"created: 2026-01-01\n---\n\n"
+            f"```turtle\n"
+            f"@prefix idea: <https://nusy.dev/idea/> .\n"
+            f"@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\n"
+            f"<#{idea_id}> a idea:Idea ;\n"
+            f'    rdfs:label "{title}" .\n'
+            f"```\n\n# {idea_id}: {title}\n"
+        )
+        return fp
+
+    def _write_expedition_file(self, repo, exp_id, title):
+        """Create a non-HDD expedition file."""
+        (repo / "kanban-work" / "expeditions").mkdir(parents=True, exist_ok=True)
+        fp = repo / "kanban-work" / "expeditions" / f"{exp_id}-test.md"
+        fp.write_text(
+            f"---\nid: {exp_id}\ntitle: \"{title}\"\ntype: expedition\nstatus: backlog\n"
+            f"created: 2026-01-01\n---\n\n# {exp_id}: {title}\n"
+        )
+        return fp
+
+    def test_backfill_adds_block(self, hdd_repo, hdd_svc_config):
+        """Idea file without turtle block gets one added."""
+        self._write_idea_file(hdd_repo, "IDEA-R-001", "Test Idea")
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        results = svc.backfill_turtle_blocks(dry_run=False)
+
+        backfilled = [r for r in results if r["action"] == "backfill"]
+        assert len(backfilled) == 1
+        assert backfilled[0]["id"] == "IDEA-R-001"
+        assert backfilled[0]["triples_added"] > 0
+
+        content = (hdd_repo / "research" / "ideas" / "IDEA-R-001-test.md").read_text()
+        assert "```turtle" in content
+        assert "idea:Idea" in content
+
+    def test_skip_when_triples_exist(self, hdd_repo, hdd_svc_config):
+        """File with existing turtle block that has all triples → up_to_date."""
+        self._write_idea_file_with_block(hdd_repo, "IDEA-R-002", "Complete Idea")
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        results = svc.backfill_turtle_blocks(dry_run=False)
+
+        up_to_date = [r for r in results if r["action"] == "up_to_date"]
+        assert len(up_to_date) == 1
+        assert up_to_date[0]["id"] == "IDEA-R-002"
+
+    def test_dry_run_no_write(self, hdd_repo, hdd_svc_config):
+        """dry_run=True reports would_backfill but doesn't modify file."""
+        self._write_idea_file(hdd_repo, "IDEA-R-003", "Dry Run Test")
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        results = svc.backfill_turtle_blocks(dry_run=True)
+
+        assert any(r["action"] == "would_backfill" for r in results)
+        content = (hdd_repo / "research" / "ideas" / "IDEA-R-003-test.md").read_text()
+        assert "```turtle" not in content  # File unchanged
+
+    def test_non_hdd_skipped(self, hdd_repo, hdd_svc_config):
+        """Expedition files are not processed by backfill."""
+        # Add expeditions scan path
+        hdd_svc_config.paths.scan_paths.append("kanban-work/expeditions/")
+        hdd_svc_config.save(hdd_repo / ".kanban" / "config.yaml")
+
+        self._write_expedition_file(hdd_repo, "EXP-001", "Test Expedition")
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        results = svc.backfill_turtle_blocks(dry_run=True)
+        assert not any(r["id"] == "EXP-001" for r in results)
+
+    def test_idempotent(self, hdd_repo, hdd_svc_config):
+        """Running backfill twice produces the same result."""
+        self._write_idea_file(hdd_repo, "IDEA-R-004", "Idempotent Test")
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        # First run: backfill
+        results1 = svc.backfill_turtle_blocks(dry_run=False)
+        assert any(r["action"] == "backfill" for r in results1)
+
+        # Re-scan and run again
+        svc.scan()
+        results2 = svc.backfill_turtle_blocks(dry_run=False)
+        assert all(r["action"] == "up_to_date" for r in results2)
+
+    def test_hypothesis_backfill_with_paper(self, hdd_repo, hdd_svc_config):
+        """Hypothesis file with paper field gets hyp:paper triple."""
+        fp = hdd_repo / "research" / "hypotheses" / "H130.1-test.md"
+        fp.write_text(
+            "---\nid: H130.1\ntitle: \"Test Hyp\"\ntype: hypothesis\n"
+            "status: active\npaper: Paper130\ntarget: \">=85%\"\n"
+            "created: 2026-01-01\n---\n\n# H130.1: Test Hyp\n"
+        )
+        svc = KanbanService(hdd_svc_config, hdd_repo)
+        svc.scan()
+
+        results = svc.backfill_turtle_blocks(dry_run=False)
+        backfilled = [r for r in results if r["action"] == "backfill"]
+        assert len(backfilled) == 1
+
+        content = fp.read_text()
+        assert "```turtle" in content
+        assert "PAPER-130" in content
+        assert ">=85%" in content

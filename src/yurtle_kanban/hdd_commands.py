@@ -58,6 +58,58 @@ def _update_parent(
 
 
 # ---------------------------------------------------------------------------
+# hdd (top-level group for cross-type operations)
+# ---------------------------------------------------------------------------
+
+
+@click.group()
+def hdd():
+    """Hypothesis-Driven Development — cross-type operations."""
+    pass
+
+
+@hdd.command("backfill")
+@click.option("--dry-run", is_flag=True, help="Preview changes without modifying files")
+def hdd_backfill(dry_run):
+    """Add missing turtle knowledge blocks to HDD files.
+
+    Scans all HDD items, builds expected RDF triples from frontmatter,
+    diffs against the file's existing graph, and inserts a fenced turtle
+    block with only the missing triples.
+    """
+    from rich.table import Table
+
+    service = _get_service()
+    results = service.backfill_turtle_blocks(dry_run=dry_run)
+
+    backfilled = [r for r in results if r["action"] in ("backfill", "would_backfill")]
+    up_to_date = [r for r in results if r["action"] == "up_to_date"]
+
+    if not backfilled and not up_to_date:
+        console.print("[dim]No HDD items found.[/dim]")
+        return
+
+    if backfilled:
+        table = Table(title="Backfill Results" + (" (dry run)" if dry_run else ""))
+        table.add_column("ID", width=16)
+        table.add_column("Type", width=12)
+        table.add_column("Triples", width=8, justify="right")
+        table.add_column("Action")
+        for r in backfilled:
+            action_text = "would add" if dry_run else "added"
+            table.add_row(r["id"], r["type"], str(r["triples_added"]), action_text)
+        console.print(table)
+
+    summary_parts = []
+    if backfilled:
+        verb = "Would backfill" if dry_run else "Backfilled"
+        summary_parts.append(f"[bold]{verb}[/bold] {len(backfilled)} files")
+    if up_to_date:
+        summary_parts.append(f"{len(up_to_date)} already up to date")
+    console.print("  ".join(summary_parts))
+
+
+# ---------------------------------------------------------------------------
 # idea
 # ---------------------------------------------------------------------------
 

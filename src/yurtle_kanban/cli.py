@@ -37,7 +37,7 @@ from .config import KanbanConfig
 from .export import export_expedition_index, export_html, export_json, export_markdown
 from .models import WorkItemStatus, WorkItemType
 from .epic_commands import epic, voyage
-from .hdd_commands import experiment, hypothesis, idea, literature, measure, paper
+from .hdd_commands import experiment, hdd, hypothesis, idea, literature, measure, paper
 from .service import KanbanService
 
 
@@ -1125,6 +1125,7 @@ def validate(fix: bool, as_json: bool):
 
 
 # HDD (Hypothesis-Driven Development) subgroups
+main.add_command(hdd)
 main.add_command(idea)
 main.add_command(literature)
 main.add_command(paper)
