@@ -23,12 +23,10 @@ Usage:
 
 __version__ = "1.11.0"
 
-# Register yurtle_rdflib plugin with rdflib (enables format="yurtle" parsing)
-# This must be imported before any rdflib Graph.parse() calls with format="yurtle"
-try:
-    import yurtle_rdflib  # noqa: F401
-except ImportError:
-    pass  # yurtle_rdflib is optional; YAML frontmatter still works without it
+# Register yurtle_rdflib plugin with rdflib (enables format="yurtle" parsing).
+# This must be imported before any rdflib Graph.parse() calls with format="yurtle".
+# Both rdflib and yurtle-rdflib are required dependencies — fail fast if missing.
+import yurtle_rdflib  # noqa: F401
 
 from yurtle_kanban.config import KanbanConfig
 from yurtle_kanban.hooks import HookContext, HookEngine, HookEvent
