@@ -185,6 +185,7 @@ class WorkItem:
             "description": self.description,
             "resolution": self.resolution,
             "superseded_by": self.superseded_by,
+            "triple_count": len(self.graph) if self.graph else 0,
         }
 
     def to_yurtle(self) -> str:
