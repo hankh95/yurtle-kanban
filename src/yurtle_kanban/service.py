@@ -23,10 +23,12 @@ import yaml
 from .config import KanbanConfig
 from .hooks import HookContext, HookEngine, HookEvent
 
+from rdflib import Graph, Namespace, URIRef
+
 if TYPE_CHECKING:
-    from rdflib import Graph
     from .config import BoardConfig
 from .models import Board, Column, Comment, WorkItem, WorkItemStatus, WorkItemType
+from .turtle_builder import PREFIXES
 from .workflow import WorkflowConfig, WorkflowParser
 
 logger = logging.getLogger("yurtle-kanban")
@@ -995,9 +997,9 @@ class KanbanService:
         },
     }
 
-    # Regex to find the first fenced ```turtle block (not ```yurtle).
+    # Regex to find the first fenced ```turtle or ```yurtle block.
     _TURTLE_BLOCK_RE = re.compile(
-        r"(```turtle\s*\r?\n)(.*?)(^```)",
+        r"(```(?:turtle|yurtle)\s*\r?\n)(.*?)(^```)",
         re.DOTALL | re.MULTILINE,
     )
 
@@ -1048,10 +1050,6 @@ class KanbanService:
             return False
 
         # Build rdflib URIs for the predicate and child object
-        from rdflib import Namespace, URIRef
-
-        from .turtle_builder import PREFIXES
-
         pred_ns = Namespace(PREFIXES[relation["predicate_ns"]])
         predicate = pred_ns[relation["predicate_local"]]
         child_ns = Namespace(PREFIXES[relation["child_prefix"]])
@@ -1074,7 +1072,7 @@ class KanbanService:
         if push:
             self._commit_and_push_file(
                 parent.file_path,
-                f"Link {child_id} to {parent_id}",
+                f"chore(hdd): link {child_id} → {parent_id}",
             )
 
         return True
@@ -1090,6 +1088,10 @@ class KanbanService:
         Uses rdflib for correct Turtle parsing and serialization.
         Handles relative URIs like <#PAPER-130> via a synthetic base URI.
 
+        Note: rdflib's Turtle serializer may reorder triples and change
+        indentation compared to the original hand-written block. This is
+        the correct trade-off (correctness over formatting).
+
         Args:
             turtle_content: Inner content of a fenced turtle block (between
                             the ``` fences, not including them).
@@ -1100,10 +1102,6 @@ class KanbanService:
             Tuple of (new_content, changed). changed is False if the triple
             already exists or no subject was found.
         """
-        from rdflib import Graph, Namespace, URIRef
-
-        from .turtle_builder import PREFIXES
-
         BASE = URIRef("urn:yurtle:block")
         g = Graph()
         try:
