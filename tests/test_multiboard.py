@@ -549,3 +549,146 @@ default_board: development
 
         assert "kanban-work" in str(item.file_path)
         assert "research" not in str(item.file_path)
+
+
+class TestBoardConfigScanPaths:
+    """Tests for BoardConfig scan_paths parsing (fix for dropped scan_paths)."""
+
+    def test_from_dict_parses_scan_paths(self):
+        """scan_paths should be preserved when loading from dict."""
+        data = {
+            "name": "research",
+            "preset": "hdd",
+            "path": "research/",
+            "scan_paths": [
+                "research/hypotheses/",
+                "research/experiments/",
+            ],
+        }
+        board = BoardConfig.from_dict(data)
+        assert board.scan_paths == [
+            "research/hypotheses/",
+            "research/experiments/",
+        ]
+
+    def test_from_dict_defaults_empty_scan_paths(self):
+        """Missing scan_paths should default to empty list."""
+        board = BoardConfig.from_dict({"name": "dev"})
+        assert board.scan_paths == []
+
+    def test_to_dict_includes_scan_paths(self):
+        """scan_paths should be serialized when present."""
+        board = BoardConfig(
+            name="research",
+            preset="hdd",
+            path="research/",
+            scan_paths=["research/hypotheses/", "research/experiments/"],
+        )
+        data = board.to_dict()
+        assert data["scan_paths"] == [
+            "research/hypotheses/",
+            "research/experiments/",
+        ]
+
+    def test_to_dict_omits_empty_scan_paths(self):
+        """Empty scan_paths should not appear in serialized form."""
+        board = BoardConfig(name="dev", path="work/")
+        data = board.to_dict()
+        assert "scan_paths" not in data
+
+    def test_v2_load_aggregates_scan_paths(self, tmp_path):
+        """_load_v2 should populate PathConfig.scan_paths from all boards."""
+        config_path = tmp_path / ".kanban" / "config.yaml"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text("""
+version: "2.0"
+boards:
+  - name: development
+    preset: nautical
+    path: kanban-work/
+    scan_paths:
+      - "kanban-work/expeditions/"
+      - "kanban-work/chores/"
+  - name: research
+    preset: hdd
+    path: research/
+    scan_paths:
+      - "research/hypotheses/"
+      - "research/experiments/"
+default_board: development
+""")
+        config = KanbanConfig.load(config_path)
+        assert len(config.paths.scan_paths) == 4
+        assert "kanban-work/expeditions/" in config.paths.scan_paths
+        assert "research/hypotheses/" in config.paths.scan_paths
+
+    def test_v2_save_load_roundtrip_with_scan_paths(self, tmp_path):
+        """scan_paths should survive a save+load roundtrip."""
+        config = KanbanConfig(
+            version=CONFIG_VERSION_MULTI,
+            boards=[
+                BoardConfig(
+                    name="dev",
+                    preset="nautical",
+                    path="work/",
+                    scan_paths=["work/features/", "work/bugs/"],
+                ),
+            ],
+        )
+        config_path = tmp_path / ".kanban" / "config.yaml"
+        config.save(config_path)
+
+        loaded = KanbanConfig.load(config_path)
+        assert loaded.boards[0].scan_paths == ["work/features/", "work/bugs/"]
+
+
+class TestIrregularPluralRouting:
+    """Tests for scan_path keyword matching with irregular plurals."""
+
+    def test_hypothesis_matches_hypotheses_scan_path(self, tmp_path):
+        """hypothesis type should match 'hypotheses' in scan_paths."""
+        from yurtle_kanban.models import WorkItemType
+
+        config = KanbanConfig(
+            theme="nonexistent",
+            paths=PathConfig(
+                root="work/",
+                scan_paths=["research/hypotheses/"],
+            ),
+        )
+        (tmp_path / "research" / "hypotheses").mkdir(parents=True)
+        svc = KanbanService(config, tmp_path)
+        path = svc._get_type_directory(WorkItemType.HYPOTHESIS)
+        assert "hypotheses" in str(path)
+
+    def test_literature_matches_literature_scan_path(self, tmp_path):
+        """literature type should match 'literature' in scan_paths."""
+        from yurtle_kanban.models import WorkItemType
+
+        config = KanbanConfig(
+            theme="nonexistent",
+            paths=PathConfig(
+                root="work/",
+                scan_paths=["research/literature/"],
+            ),
+        )
+        (tmp_path / "research" / "literature").mkdir(parents=True)
+        svc = KanbanService(config, tmp_path)
+        path = svc._get_type_directory(WorkItemType.LITERATURE)
+        assert "literature" in str(path)
+
+    def test_experiment_still_matches_with_regular_plural(self, tmp_path):
+        """Regular plurals (experiment→experiments) should still work."""
+        from yurtle_kanban.models import WorkItemType
+
+        config = KanbanConfig(
+            theme="nonexistent",
+            paths=PathConfig(
+                root="work/",
+                scan_paths=["research/experiments/"],
+            ),
+        )
+        (tmp_path / "research" / "experiments").mkdir(parents=True)
+        svc = KanbanService(config, tmp_path)
+        path = svc._get_type_directory(WorkItemType.EXPERIMENT)
+        assert "experiments" in str(path)

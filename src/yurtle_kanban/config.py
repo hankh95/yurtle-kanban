@@ -82,6 +82,7 @@ class BoardConfig:
     name: str
     preset: str = "software"
     path: str = "work/"
+    scan_paths: list[str] = field(default_factory=list)
     wip_limits: dict[str, int] = field(default_factory=dict)
     ignore: list[str] = field(default_factory=lambda: ["**/archive/**", "**/templates/**"])
 
@@ -100,6 +101,7 @@ class BoardConfig:
             name=data.get("name", "default"),
             preset=data.get("preset", "software"),
             path=data.get("path", "work/"),
+            scan_paths=data.get("scan_paths", []),
             wip_limits=data.get("wip_limits", {}),
             ignore=data.get("ignore", ["**/archive/**", "**/templates/**"]),
         )
@@ -111,6 +113,8 @@ class BoardConfig:
             "preset": self.preset,
             "path": self.path,
         }
+        if self.scan_paths:
+            result["scan_paths"] = self.scan_paths
         if self.wip_limits:
             result["wip_limits"] = self.wip_limits
         if self.ignore != ["**/archive/**", "**/templates/**"]:
@@ -229,6 +233,11 @@ class KanbanConfig:
         """Load v2 multi-board configuration."""
         boards = [BoardConfig.from_dict(b) for b in data.get("boards", [])]
 
+        # Aggregate scan_paths from all boards for Priority 3 fallback
+        all_scan_paths: list[str] = []
+        for board in boards:
+            all_scan_paths.extend(board.scan_paths)
+
         return cls(
             version=CONFIG_VERSION_MULTI,
             boards=boards,
@@ -236,7 +245,10 @@ class KanbanConfig:
             default_board=data.get("default_board"),
             # Keep v1 fields for backward compatibility in code
             theme=boards[0].preset if boards else "software",
-            paths=PathConfig(root=boards[0].path if boards else "work/"),
+            paths=PathConfig(
+                root=boards[0].path if boards else "work/",
+                scan_paths=all_scan_paths,
+            ),
         )
 
     def save(self, config_path: Path) -> None:

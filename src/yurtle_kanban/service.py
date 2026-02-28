@@ -600,9 +600,13 @@ class KanbanService:
             return self.repo_root / type_path
 
         # Priority 3: Match scan_paths by type keyword
-        plural = item_type.value + "s"  # e.g., "expedition" → "expeditions"
+        _IRREGULAR_PLURALS = {
+            "hypothesis": "hypotheses",
+            "literature": "literature",
+        }
+        plural = _IRREGULAR_PLURALS.get(item_type.value, item_type.value + "s")
         for scan_path in self.config.paths.scan_paths:
-            if plural in scan_path.lower():
+            if plural in scan_path.lower() or item_type.value in scan_path.lower():
                 return self.repo_root / scan_path
 
         # Priority 4: Fall back to root
