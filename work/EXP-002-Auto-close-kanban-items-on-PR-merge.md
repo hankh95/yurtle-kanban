@@ -61,31 +61,60 @@ exp-1023-hdd-knowledge-blocks → EXP-1023
 chore-055-document-dual-repr  → CHORE-055
 ```
 
-## Existing Workflows
+## Prior Art: nusy-product-team `kanban-ci.yml`
+
+`nusy-product-team/.github/workflows/kanban-ci.yml` (EXP-930) already has a
+4-phase kanban CI pipeline including an `auto-move` job. What it does:
+
+- Triggers on `pull_request.closed` + `merged == true`
+- Extracts expedition ID from `exp-*` branch names only
+- Moves to `review` (not `done`) — agent does final verification
+- Commits and pushes via `github-actions[bot]`
+
+**Limitations to generalize:**
+- Hardcoded to `exp-*` prefix only — no CHORE, FEAT, VOY, HYP, etc.
+- No PR body keyword support (`Closes EXP-XXX`)
+- Moves to `review` only — should be configurable (`done` or `review`)
+- Lives in nusy-product-team — not reusable by other yurtle-kanban consumers
+
+This expedition ships the generalized version **in yurtle-kanban itself**,
+so any repo (including nusy with Bosun/HDD workflows) can adopt it.
+
+## Existing yurtle-kanban Workflows
 
 - **`ci.yml`** — Tests + linting + type-check on PRs/pushes
 - **`kanban-board.yml`** — Regenerates static HTML board on push to main
-  when work item files change
 
 The auto-close action feeds naturally into `kanban-board.yml`: PR merge →
 auto-close moves item to `done` → that push triggers board regeneration.
 
 ## Scope
 
-1. GitHub Action workflow file (`.github/workflows/kanban-auto-close.yml`)
-2. Helper script or inline logic to parse item IDs from branch + body
-3. Documentation in README for adoption by other repos
+1. **Reusable workflow** (`.github/workflows/kanban-auto-close.yml`) shipped
+   with yurtle-kanban — consuming repos reference it via
+   `uses: hankh95/yurtle-kanban/.github/workflows/kanban-auto-close.yml@main`
+2. ID extraction logic supporting all item prefixes (EXP, CHORE, FEAT, VOY,
+   EPIC, BUG, HYP, LIT, PAPER, IDEA, MEASURE) from both branch names and
+   PR body keywords
+3. Configurable target status (`done` or `review`) via workflow input
+4. Documentation in README for adoption
+5. After shipping: update nusy-product-team `kanban-ci.yml` to replace its
+   `auto-move` job with the reusable workflow from yurtle-kanban
 
 ## Non-Goals
 
 - GitLab / Bitbucket support (GitHub Actions only for now)
-- Moving to statuses other than `done` (e.g., `review`)
 - Reopening items if a PR is reverted
+- Replacing the other 3 phases of nusy's `kanban-ci.yml` (validate,
+  annotate, label) — those are nusy-specific
 
 ## Acceptance Criteria
 
 - [ ] Merging a PR with `Closes EXP-XXX` in the body moves that item to done
 - [ ] Merging a PR on branch `exp-xxx-*` moves that item to done (fallback)
+- [ ] Works with all item prefixes (EXP, CHORE, FEAT, VOY, HYP, etc.)
 - [ ] Multiple `Closes` keywords in one PR move multiple items
+- [ ] Target status is configurable (`done` or `review`)
 - [ ] No-op if item is already done or ID not found (no error)
-- [ ] Action is documented for adoption by consuming repos
+- [ ] Ships as reusable workflow in yurtle-kanban repo
+- [ ] Documented for adoption by consuming repos
