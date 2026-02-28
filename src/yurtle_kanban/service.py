@@ -979,6 +979,221 @@ class KanbanService:
 
         return max_n + 1
 
+    # ------------------------------------------------------------------
+    # Parent turtle block auto-update (EXP-1026)
+    # ------------------------------------------------------------------
+
+    # Inverse relationships: when a child HDD item is created, what triple
+    # to add to the parent's turtle block.
+    _INVERSE_RELATIONS: dict[str, dict[str, str]] = {
+        "hypothesis": {
+            "predicate_ns": "paper",
+            "predicate_local": "hasHypothesis",
+            "child_prefix": "hyp",
+        },
+        "experiment": {
+            "predicate_ns": "hyp",
+            "predicate_local": "hasExperiment",
+            "child_prefix": "expr",
+        },
+        "literature": {
+            "predicate_ns": "idea",
+            "predicate_local": "hasLiterature",
+            "child_prefix": "lit",
+        },
+    }
+
+    # Regex to find the first fenced ```turtle block (not ```yurtle).
+    _TURTLE_BLOCK_RE = re.compile(
+        r"(```turtle\s*\r?\n)(.*?)(^```)",
+        re.DOTALL | re.MULTILINE,
+    )
+
+    def update_parent_turtle_block(
+        self,
+        parent_id: str,
+        child_type: str,
+        child_id: str,
+        push: bool = False,
+    ) -> bool:
+        """Update a parent item's turtle block with an inverse reference to a child.
+
+        When a child HDD item is created (hypothesis, experiment, literature),
+        this method adds a triple to the parent's turtle block so the parent
+        knows about its children.
+
+        Uses rdflib for correct Turtle parsing, triple addition, and
+        serialization. Requires yurtle-rdflib to be installed.
+
+        Args:
+            parent_id: ID of the parent item (e.g., "PAPER-130", "H130.1").
+            child_type: Type of the child item ("hypothesis", "experiment",
+                        "literature").
+            child_id: ID of the child item (e.g., "H130.1", "EXPR-130").
+            push: Whether to commit and push the parent file update.
+
+        Returns:
+            True if the parent was updated, False otherwise.
+        """
+        if not self._has_yurtle_rdflib:
+            logger.debug("yurtle-rdflib not available — skipping parent update")
+            return False
+
+        relation = self._INVERSE_RELATIONS.get(child_type)
+        if relation is None:
+            logger.debug(f"No inverse relation defined for child type: {child_type}")
+            return False
+
+        parent = self.get_item(parent_id)
+        if parent is None:
+            logger.warning(f"Parent {parent_id} not found — skipping inverse reference")
+            return False
+
+        if not parent.file_path.exists():
+            logger.warning(f"Parent file {parent.file_path} missing — skipping")
+            return False
+
+        content = parent.file_path.read_text()
+        match = self._TURTLE_BLOCK_RE.search(content)
+        if not match:
+            logger.warning(f"No turtle block in {parent_id} — skipping inverse reference")
+            return False
+
+        # Build rdflib URIs for the predicate and child object
+        from rdflib import Namespace, URIRef
+
+        from .turtle_builder import PREFIXES
+
+        pred_ns = Namespace(PREFIXES[relation["predicate_ns"]])
+        predicate = pred_ns[relation["predicate_local"]]
+        child_ns = Namespace(PREFIXES[relation["child_prefix"]])
+        child_uri = child_ns[child_id]
+
+        # Modify the turtle block using rdflib
+        old_inner = match.group(2)
+        new_inner, changed = self._modify_turtle_block(old_inner, predicate, child_uri)
+        if not changed:
+            return False
+
+        # Replace the turtle block in the file
+        new_block = match.group(1) + new_inner + "\n" + match.group(3)
+        new_content = content[: match.start()] + new_block + content[match.end() :]
+        parent.file_path.write_text(new_content)
+
+        # Re-parse graph for the updated parent
+        parent.graph = self._parse_graph(new_content)
+
+        if push:
+            self._commit_and_push_file(
+                parent.file_path,
+                f"Link {child_id} to {parent_id}",
+            )
+
+        return True
+
+    def _modify_turtle_block(
+        self,
+        turtle_content: str,
+        predicate_uri: Any,
+        child_uri: Any,
+    ) -> tuple[str, bool]:
+        """Parse a turtle block, add a triple, and serialize back.
+
+        Uses rdflib for correct Turtle parsing and serialization.
+        Handles relative URIs like <#PAPER-130> via a synthetic base URI.
+
+        Args:
+            turtle_content: Inner content of a fenced turtle block (between
+                            the ``` fences, not including them).
+            predicate_uri: rdflib URIRef for the predicate to add.
+            child_uri: rdflib URIRef for the child object to add.
+
+        Returns:
+            Tuple of (new_content, changed). changed is False if the triple
+            already exists or no subject was found.
+        """
+        from rdflib import Graph, Namespace, URIRef
+
+        from .turtle_builder import PREFIXES
+
+        BASE = URIRef("urn:yurtle:block")
+        g = Graph()
+        try:
+            g.parse(data=turtle_content, format="turtle", publicID=str(BASE))
+        except Exception as e:
+            logger.warning(f"Failed to parse turtle block for modification: {e}")
+            return turtle_content, False
+
+        # Find subject — first URIRef (skip BNodes)
+        subject = next(
+            (s for s in g.subjects() if isinstance(s, URIRef)),
+            None,
+        )
+        if subject is None:
+            return turtle_content, False
+
+        # Idempotency: skip if triple already present
+        if (subject, predicate_uri, child_uri) in g:
+            return turtle_content, False
+
+        # Add the inverse triple
+        g.add((subject, predicate_uri, child_uri))
+
+        # Bind all HDD prefixes for clean serialization
+        for name, uri in PREFIXES.items():
+            g.bind(name, Namespace(uri))
+
+        # Serialize with base to preserve <#ID> relative URIs
+        result = g.serialize(format="turtle", base=BASE)
+        if isinstance(result, bytes):
+            result = result.decode("utf-8")
+
+        # Strip @base declaration (original blocks don't have it)
+        lines = result.strip().split("\n")
+        lines = [line for line in lines if not line.startswith("@base ")]
+        return "\n".join(lines), True
+
+    def _commit_and_push_file(self, file_path: Path, message: str) -> bool:
+        """Commit a single file change and push to remote.
+
+        Used for follow-up operations (e.g., parent turtle block updates)
+        after the main create-and-push.
+
+        Returns:
+            True if commit (and optional push) succeeded, False otherwise.
+        """
+        try:
+            subprocess.run(
+                ["git", "add", str(file_path)],
+                cwd=self.repo_root,
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-m", message],
+                cwd=self.repo_root,
+                capture_output=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Git commit failed for parent update: {e}")
+            return False
+
+        if self._has_remote():
+            try:
+                subprocess.run(
+                    ["git", "push"],
+                    cwd=self.repo_root,
+                    capture_output=True,
+                    check=True,
+                    timeout=30,
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                logger.warning(f"Git push failed for parent update: {e}")
+                return False
+
+        return True
+
     def allocate_next_id(
         self,
         prefix: str,

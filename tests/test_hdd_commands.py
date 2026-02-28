@@ -716,3 +716,206 @@ class TestHypothesisNumbering:
         assert service.get_next_hypothesis_number("130") == 2
         assert service.get_next_hypothesis_number("131") == 2
         assert service.get_next_hypothesis_number("132") == 1
+
+
+# ---------------------------------------------------------------------------
+# TestParentAutoUpdate
+# ---------------------------------------------------------------------------
+
+
+def _make_paper_file(papers_dir, paper_num):
+    """Create a paper file with a turtle knowledge block."""
+    content = f'''---
+id: PAPER-{paper_num}
+title: "Test Paper {paper_num}"
+type: paper
+status: draft
+created: 2026-01-01
+priority: medium
+tags: []
+---
+
+# PAPER-{paper_num}: Test Paper {paper_num}
+
+```turtle
+@prefix paper: <https://nusy.dev/paper/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<#PAPER-{paper_num}> a paper:Paper ;
+    rdfs:label "Test Paper {paper_num}" .
+```
+
+## Abstract
+
+Test paper for parent auto-update.
+'''
+    path = papers_dir / f"PAPER-{paper_num}-Test-Paper-{paper_num}.md"
+    path.write_text(content)
+    return path
+
+
+def _make_hypothesis_file(hyp_dir, hyp_id, paper_num):
+    """Create a hypothesis file with a turtle knowledge block."""
+    content = f'''---
+id: {hyp_id}
+title: "Test Hypothesis"
+type: hypothesis
+status: draft
+paper: PAPER-{paper_num}
+created: 2026-01-01
+priority: medium
+tags: []
+---
+
+# {hyp_id}: Test Hypothesis
+
+```turtle
+@prefix hyp: <https://nusy.dev/hypothesis/> .
+@prefix paper: <https://nusy.dev/paper/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<#{hyp_id}> a hyp:Hypothesis ;
+    rdfs:label "Test Hypothesis" ;
+    hyp:paper paper:PAPER-{paper_num} .
+```
+
+## Rationale
+
+Test hypothesis for parent auto-update.
+'''
+    path = hyp_dir / f"{hyp_id}-Test-Hypothesis.md"
+    path.write_text(content)
+    return path
+
+
+def _make_idea_file(ideas_dir, idea_id):
+    """Create an idea file with a turtle knowledge block."""
+    content = f'''---
+id: {idea_id}
+title: "Test Idea"
+type: idea
+status: draft
+created: 2026-01-01
+priority: medium
+tags: []
+---
+
+# {idea_id}: Test Idea
+
+```turtle
+@prefix idea: <https://nusy.dev/idea/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<#{idea_id}> a idea:Idea ;
+    rdfs:label "Test Idea" .
+```
+
+## Observation
+
+Test idea for parent auto-update.
+'''
+    path = ideas_dir / f"{idea_id}-Test-Idea.md"
+    path.write_text(content)
+    return path
+
+
+class TestParentAutoUpdate:
+    """Integration tests: creating a child HDD item auto-updates the parent's turtle block."""
+
+    def test_hypothesis_updates_paper(self, runner, temp_repo, hdd_config):
+        """Creating a hypothesis should add paper:hasHypothesis to the paper file."""
+        paper_path = _make_paper_file(temp_repo / "research" / "papers", "130")
+
+        result = runner.invoke(
+            main,
+            ["hypothesis", "create", "V12 improves accuracy", "--paper", "130"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        assert "H130.1" in result.output
+
+        # Paper file should now contain the inverse reference
+        content = paper_path.read_text()
+        assert "hasHypothesis" in content
+
+    def test_second_hypothesis_adds_to_paper(self, runner, temp_repo, hdd_config):
+        """Two hypotheses should both be referenced in the paper file."""
+        paper_path = _make_paper_file(temp_repo / "research" / "papers", "130")
+
+        runner.invoke(
+            main,
+            ["hypothesis", "create", "First claim", "--paper", "130"],
+            catch_exceptions=False,
+        )
+        runner.invoke(
+            main,
+            ["hypothesis", "create", "Second claim", "--paper", "130"],
+            catch_exceptions=False,
+        )
+
+        content = paper_path.read_text()
+        assert "H130.1" in content
+        assert "H130.2" in content
+
+    def test_experiment_updates_hypothesis(self, runner, temp_repo, hdd_config):
+        """Creating an experiment should add hyp:hasExperiment to the hypothesis file."""
+        _make_paper_file(temp_repo / "research" / "papers", "130")
+        hyp_path = _make_hypothesis_file(
+            temp_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+
+        result = runner.invoke(
+            main,
+            [
+                "experiment", "create", "EXPR-130",
+                "--hypothesis", "H130.1",
+                "--title", "V12 accuracy test",
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+
+        # Hypothesis file should contain the inverse reference
+        content = hyp_path.read_text()
+        assert "hasExperiment" in content
+
+    def test_literature_updates_idea(self, runner, temp_repo, hdd_config):
+        """Creating literature with --idea should add idea:hasLiterature to the idea file."""
+        idea_path = _make_idea_file(temp_repo / "research" / "ideas", "IDEA-R-001")
+
+        result = runner.invoke(
+            main,
+            ["literature", "create", "Transfer Learning Survey", "--idea", "IDEA-R-001"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+
+        # Idea file should contain the inverse reference
+        content = idea_path.read_text()
+        assert "hasLiterature" in content
+
+    def test_literature_without_idea_no_update(self, runner, temp_repo, hdd_config):
+        """Creating literature without --idea should not attempt parent update."""
+        result = runner.invoke(
+            main,
+            ["literature", "create", "Standalone Survey"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        assert "Updated" not in result.output
+
+    def test_missing_parent_child_still_created(self, runner, temp_repo, hdd_config):
+        """If the parent file doesn't exist, child should still be created successfully."""
+        # No paper file exists — hypothesis should still be created
+        result = runner.invoke(
+            main,
+            ["hypothesis", "create", "Orphan hypothesis", "--paper", "999"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        assert "H999.1" in result.output
+
+        # Verify child file was created
+        hyp_dir = temp_repo / "research" / "hypotheses"
+        files = list(hyp_dir.glob("H999.1*.md"))
+        assert len(files) == 1
