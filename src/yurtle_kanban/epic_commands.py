@@ -297,6 +297,12 @@ def _do_show(epic_id: str):
 
     console.print(table)
 
+    # Research interlinks for HDD items
+    from .research_interlinks import has_research_items, render_research_interlinks
+
+    if has_research_items(linked_items):
+        render_research_interlinks(linked_items, console)
+
 
 def _do_add(epic_id: str, item_id: str):
     """Link an item to an epic/voyage by adding it to the item's related field."""
