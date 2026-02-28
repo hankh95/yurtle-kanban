@@ -116,6 +116,7 @@ class WorkItem:
     updated: datetime | None = None
     tags: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
+    related: list[str] = field(default_factory=list)
     blocks: list[str] = field(default_factory=list)
     description: str | None = None
     comments: list[Comment] = field(default_factory=list)
@@ -163,6 +164,7 @@ class WorkItem:
             "updated": self.updated.isoformat() if self.updated else None,
             "tags": self.tags,
             "depends_on": self.depends_on,
+            "related": self.related,
             "blocks": self.blocks,
             "description": self.description,
             "resolution": self.resolution,
@@ -196,6 +198,10 @@ class WorkItem:
         if self.depends_on:
             deps_str = ", ".join(f"<{dep}>" for dep in self.depends_on)
             lines.append(f"   kb:dependsOn {deps_str} ;")
+
+        if self.related:
+            rel_str = ", ".join(f"<{rel}>" for rel in self.related)
+            lines.append(f"   kb:related {rel_str} ;")
 
         if self.resolution:
             lines.append(f'   kb:resolution "{self.resolution}" ;')
@@ -237,6 +243,9 @@ class WorkItem:
             lines.append(f"depends_on: [{', '.join(self.depends_on)}]")
         else:
             lines.append("depends_on: []")
+
+        if self.related:
+            lines.append(f"related: [{', '.join(self.related)}]")
 
         if self.resolution:
             lines.append(f"resolution: {self.resolution}")

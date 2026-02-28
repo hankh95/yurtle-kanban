@@ -36,6 +36,7 @@ from .board import (
 from .config import KanbanConfig
 from .export import export_expedition_index, export_html, export_json, export_markdown
 from .models import WorkItemStatus, WorkItemType
+from .campaign_commands import epic, voyage
 from .hdd_commands import experiment, hypothesis, idea, literature, measure, paper
 from .service import KanbanService
 
@@ -491,7 +492,8 @@ def show(item_id: str, as_json: bool):
 @main.command()
 @click.argument("board_name", required=False)
 @click.option("--all", "show_all", is_flag=True, help="Show all boards (multi-board mode)")
-def board(board_name: str | None, show_all: bool):
+@click.option("--voyage", "voyage_id", help="Filter to items linked to this voyage/epic")
+def board(board_name: str | None, show_all: bool, voyage_id: str | None):
     """Show the kanban board view.
 
     In multi-board mode, specify BOARD_NAME to view a specific board.
@@ -502,6 +504,7 @@ def board(board_name: str | None, show_all: bool):
         yurtle-kanban board research        # Show the 'research' board
         yurtle-kanban board development     # Show the 'development' board
         yurtle-kanban board --all           # Show all boards
+        yurtle-kanban board --voyage VOY-108  # Show items linked to VOY-108
     """
     service = get_service()
     config = service.config
@@ -513,11 +516,17 @@ def board(board_name: str | None, show_all: bool):
             console.print(f"  Preset: {board_config.preset}")
             console.print(f"  Path: {board_config.path}")
             board_data = service.get_board(board_name=board_config.name)
+            if voyage_id:
+                board_data.items = [
+                    i for i in board_data.items if voyage_id in i.related
+                ]
             render_board(board_data, console)
             console.print()
         return
 
     board_data = service.get_board(board_name=board_name)
+    if voyage_id:
+        board_data.items = [i for i in board_data.items if voyage_id in i.related]
     render_board(board_data, console)
 
 
@@ -1122,6 +1131,10 @@ main.add_command(paper)
 main.add_command(hypothesis)
 main.add_command(experiment)
 main.add_command(measure)
+
+# Initiative subgroups (voyage for nautical, epic for software)
+main.add_command(voyage)
+main.add_command(epic)
 
 
 if __name__ == "__main__":
