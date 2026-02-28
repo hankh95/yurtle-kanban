@@ -45,12 +45,6 @@ class KanbanService:
         self._hook_engine = HookEngine(
             hooks_config or (repo_root / ".kanban" / "hooks" / "kanban-hooks.yurtle.md")
         )
-        # Cache yurtle-rdflib availability (avoid repeated import attempts)
-        try:
-            import yurtle_rdflib  # noqa: F401
-            self._has_yurtle_rdflib = True
-        except ImportError:
-            self._has_yurtle_rdflib = False
         self._hook_engine.set_callback("create_item", self._hook_create_item)
 
     def scan(self) -> list[WorkItem]:
@@ -211,10 +205,8 @@ class KanbanService:
 
         Returns an rdflib.Graph with triples from both YAML/Turtle frontmatter
         and fenced ```turtle/```yurtle blocks in the markdown body.
-        Returns None if yurtle-rdflib is not available or parsing fails.
+        Returns None if parsing fails.
         """
-        if not self._has_yurtle_rdflib:
-            return None
         try:
             import yurtle_rdflib
             doc = yurtle_rdflib.parse_yurtle(content)
@@ -1035,10 +1027,6 @@ class KanbanService:
         Returns:
             True if the parent was updated, False otherwise.
         """
-        if not self._has_yurtle_rdflib:
-            logger.debug("yurtle-rdflib not available — skipping parent update")
-            return False
-
         relation = self._INVERSE_RELATIONS.get(child_type)
         if relation is None:
             logger.debug(f"No inverse relation defined for child type: {child_type}")

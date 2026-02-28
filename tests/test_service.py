@@ -739,17 +739,6 @@ class TestWorkItemGraph:
         assert any("M-007" in m for m in measures)
         assert any("M-025" in m for m in measures)
 
-    def test_graph_none_without_yurtle_rdflib(self, temp_repo, nautical_config):
-        """WorkItem.graph should be None if yurtle-rdflib unavailable."""
-        svc = KanbanService(nautical_config, temp_repo)
-        # Simulate yurtle-rdflib not being installed
-        svc._has_yurtle_rdflib = False
-        svc.create_item(WorkItemType.EXPEDITION, "No RDFlib")
-        svc.scan()
-        reloaded = svc.get_item("EXP-001")
-        assert reloaded is not None
-        assert reloaded.graph is None
-
     def test_graph_empty_for_yaml_only(self, temp_repo, nautical_config):
         """YAML-only files should still have a graph (from frontmatter conversion)."""
         svc = KanbanService(nautical_config, temp_repo)
@@ -1089,13 +1078,6 @@ class TestUpdateParentTurtleBlock:
         assert svc.update_parent_turtle_block("PAPER-130", "hypothesis", "H130.1") is True
         svc.scan()
         assert svc.update_parent_turtle_block("PAPER-130", "hypothesis", "H130.1") is False
-
-    def test_no_rdflib_graceful_skip(self, hdd_repo, hdd_svc_config):
-        """When yurtle-rdflib is not available, returns False."""
-        svc = KanbanService(hdd_svc_config, hdd_repo)
-        svc._has_yurtle_rdflib = False
-        result = svc.update_parent_turtle_block("PAPER-130", "hypothesis", "H130.1")
-        assert result is False
 
     def test_markdown_content_preserved(self, hdd_repo, hdd_svc_config):
         """Markdown content outside the turtle block should be preserved."""
