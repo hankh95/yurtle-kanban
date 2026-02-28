@@ -198,8 +198,8 @@ class KanbanService:
             if len(parts) >= 3:
                 content = parts[2]
 
-        # Remove yurtle blocks
-        content = re.sub(r"```yurtle.*?```", "", content, flags=re.DOTALL)
+        # Remove yurtle and turtle knowledge blocks
+        content = re.sub(r"```(?:yurtle|turtle).*?```", "", content, flags=re.DOTALL)
 
         # Remove heading (title)
         lines = content.strip().split("\n")

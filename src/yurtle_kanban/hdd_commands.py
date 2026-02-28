@@ -273,6 +273,8 @@ def hypothesis():
 @click.option("--id", "hyp_id", default=None, help="Explicit ID (e.g., H130.1). Auto-allocates if omitted.")
 @click.option("--target", default=None, help="Target metric value (e.g., '>=50%')")
 @click.option("--source-idea", default=None, help="Source idea ID (e.g., IDEA-R-001)")
+@click.option("--measures", default=None, help="Comma-separated measure IDs (e.g., 'M-007,M-025')")
+@click.option("--literature", default=None, help="Comma-separated literature IDs (e.g., 'LIT-001,LIT-003')")
 @click.option("--priority", "-p", default="medium", help="Priority")
 @click.option("--push", is_flag=True, help="Atomic: create, commit, and push")
 def hypothesis_create(
@@ -281,6 +283,8 @@ def hypothesis_create(
     hyp_id: str | None,
     target: str | None,
     source_idea: str | None,
+    measures: str | None,
+    literature: str | None,
     priority: str,
     push: bool,
 ):
@@ -314,7 +318,7 @@ def hypothesis_create(
         console.print(f"[red]{hyp_id} already exists: {existing.title}[/red]")
         sys.exit(1)
 
-    variables: dict[str, str] = {
+    variables: dict[str, str | list[str]] = {
         "id": hyp_id,
         "title": statement,
         "paper": str(paper_num),
@@ -324,6 +328,10 @@ def hypothesis_create(
         variables["target"] = target
     if source_idea:
         variables["source_idea"] = source_idea
+    if measures:
+        variables["measures"] = [m.strip() for m in measures.split(",")]
+    if literature:
+        variables["literature"] = [lit.strip() for lit in literature.split(",")]
 
     try:
         content = engine.render("hdd", "hypothesis", variables)
@@ -373,9 +381,10 @@ def experiment():
 @click.argument("expr_id")
 @click.option("--hypothesis", "hyp_id", required=True, help="Hypothesis ID (e.g., H130.1)")
 @click.option("--title", required=True, help="Experiment title")
+@click.option("--measures", default=None, help="Comma-separated measure IDs (e.g., 'M-007,M-025')")
 @click.option("--priority", "-p", default="medium", help="Priority")
 @click.option("--push", is_flag=True, help="Atomic: create, commit, and push")
-def experiment_create(expr_id: str, hyp_id: str, title: str, priority: str, push: bool):
+def experiment_create(expr_id: str, hyp_id: str, title: str, measures: str | None, priority: str, push: bool):
     """Create a new experiment.
 
     EXPR_ID is the experiment ID (e.g., EXPR-130).
@@ -400,13 +409,15 @@ def experiment_create(expr_id: str, hyp_id: str, title: str, priority: str, push
     paper_num = expr_id.replace("EXPR-", "")
     hyp_n = hyp_id.split(".")[-1] if "." in hyp_id else "1"
 
-    variables: dict[str, str] = {
+    variables: dict[str, str | list[str]] = {
         "id": expr_id,
         "title": title,
         "paper": paper_num,
         "n": hyp_n,
         "hypothesis_id": hyp_id,
     }
+    if measures:
+        variables["measures"] = [m.strip() for m in measures.split(",")]
 
     try:
         content = engine.render("hdd", "experiment", variables)

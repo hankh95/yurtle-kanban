@@ -123,14 +123,14 @@ class TestTemplateEngine:
         assert "# Test Idea" in content
 
     def test_render_literature_with_source_idea(self, engine):
-        """Literature template should link to source idea."""
+        """Literature template should link to source idea in Turtle block."""
         content = engine.render("hdd", "literature", {
             "id": "LIT-001",
             "title": "Survey of Methods",
             "source_idea": "IDEA-R-003",
         })
         assert "id: LIT-001" in content
-        assert "source_idea: IDEA-R-003" in content
+        assert "lit:explores idea:IDEA-R-003" in content
 
     def test_render_hypothesis_with_paper(self, engine):
         """Hypothesis template should substitute paper and n."""

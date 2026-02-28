@@ -11,14 +11,20 @@ import re
 from datetime import date
 from pathlib import Path
 
+from yurtle_kanban.turtle_builder import TurtleBlockBuilder
+
+# HDD item types that get Turtle knowledge blocks generated.
+_HDD_TURTLE_TYPES = {"idea", "literature", "paper", "hypothesis", "experiment", "measure"}
+
 
 class TemplateEngine:
     """Load and render themed item templates with variable substitution."""
 
     def __init__(self, templates_dir: Path):
         self.templates_dir = templates_dir
+        self._turtle_builder = TurtleBlockBuilder()
 
-    def render(self, theme: str, item_type: str, variables: dict[str, str]) -> str:
+    def render(self, theme: str, item_type: str, variables: dict[str, str | list[str]]) -> str:
         """Load template and substitute variables.
 
         Args:
@@ -172,6 +178,18 @@ class TemplateEngine:
                 count=1,
                 flags=re.MULTILINE,
             )
+
+        # Generate and substitute Turtle knowledge block for HDD items
+        if item_type in _HDD_TURTLE_TYPES:
+            turtle_block = self._turtle_builder.build(item_type, variables)
+            if turtle_block:
+                content = re.sub(
+                    r"```turtle\n.*?```",
+                    turtle_block,
+                    content,
+                    count=1,
+                    flags=re.DOTALL,
+                )
 
         return content
 
