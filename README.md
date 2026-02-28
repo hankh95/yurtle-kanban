@@ -529,7 +529,7 @@ jobs:
 
 ## Changelog
 
-### v1.12.0 (unreleased)
+### v1.12.0 (2026-02-28)
 
 **Graph-native knowledge blocks and research tooling.**
 
