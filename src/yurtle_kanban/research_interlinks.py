@@ -10,7 +10,7 @@ Only renders when linked items include HDD types with knowledge graphs.
 
 from __future__ import annotations
 
-from rdflib import Namespace, RDFS
+from rdflib import RDFS, Namespace
 from rich.console import Console
 from rich.table import Table
 

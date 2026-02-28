@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from rdflib import Graph, URIRef
@@ -28,7 +28,7 @@ class WorkItemStatus(Enum):
     BLOCKED = "blocked"
 
     @classmethod
-    def from_string(cls, value: str) -> "WorkItemStatus":
+    def from_string(cls, value: str) -> WorkItemStatus:
         """Parse status from string, handling various formats."""
         normalized = value.lower().replace("-", "_").replace(" ", "_")
         for status in cls:
@@ -62,7 +62,7 @@ class WorkItemType(Enum):
     MEASURE = "measure"
 
     @classmethod
-    def from_string(cls, value: str) -> "WorkItemType":
+    def from_string(cls, value: str) -> WorkItemType:
         """Parse type from string."""
         normalized = value.lower()
         for item_type in cls:

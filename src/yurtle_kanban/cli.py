@@ -34,10 +34,10 @@ from .board import (
     render_stats,
 )
 from .config import KanbanConfig
-from .export import export_expedition_index, export_html, export_json, export_markdown
-from .models import WorkItemStatus, WorkItemType
 from .epic_commands import epic, voyage
+from .export import export_expedition_index, export_html, export_json, export_markdown
 from .hdd_commands import experiment, hdd, hypothesis, idea, literature, measure, paper
+from .models import WorkItemStatus, WorkItemType
 from .service import KanbanService
 
 
@@ -572,13 +572,17 @@ def list_boards(as_json: bool):
             })
 
     if as_json:
-        click.echo(json.dumps({"boards": boards_info, "multi_board": config.is_multi_board}, indent=2))
+        data = {"boards": boards_info, "multi_board": config.is_multi_board}
+        click.echo(json.dumps(data, indent=2))
         return
 
     if not config.is_multi_board:
-        console.print("[dim]Single-board mode. Use 'yurtle-kanban init --multi-board' to enable multi-board.[/dim]")
+        console.print(
+            "[dim]Single-board mode. Use 'yurtle-kanban init"
+            " --multi-board' to enable multi-board.[/dim]"
+        )
         console.print()
-        console.print(f"[bold]Board:[/bold] default")
+        console.print("[bold]Board:[/bold] default")
         console.print(f"  Preset: {config.theme}")
         console.print(f"  Path: {config.paths.root or 'work/'}")
     else:
@@ -599,7 +603,10 @@ def list_boards(as_json: bool):
 @click.argument("name")
 @click.option("--preset", "-p", default="software", help="Preset/theme to use (default: software)")
 @click.option("--path", required=True, help="Path for board's work items")
-@click.option("--wip-limit", "-w", multiple=True, help="WIP limit as 'status:limit' (e.g., 'in_progress:3')")
+@click.option(
+    "--wip-limit", "-w", multiple=True,
+    help="WIP limit as 'status:limit' (e.g., 'in_progress:3')",
+)
 @click.option("--default", "make_default", is_flag=True, help="Make this the default board")
 def board_add(name: str, preset: str, path: str, wip_limit: tuple[str, ...], make_default: bool):
     """Add a new board to the configuration.
@@ -611,7 +618,7 @@ def board_add(name: str, preset: str, path: str, wip_limit: tuple[str, ...], mak
         yurtle-kanban board-add development --preset nautical --path kanban-work/ --default
         yurtle-kanban board-add tasks --preset software --path work/ --wip-limit in_progress:3
     """
-    from .config import BoardConfig, CONFIG_VERSION_MULTI, _load_builtin_theme
+    from .config import BoardConfig, _load_builtin_theme
 
     service = get_service()
     config = service.config
@@ -672,7 +679,7 @@ def board_add(name: str, preset: str, path: str, wip_limit: tuple[str, ...], mak
         wip_str = ", ".join(f"{k}: {v}" for k, v in wip_limits.items())
         console.print(f"  WIP Limits: {wip_str}")
     if make_default:
-        console.print(f"  [cyan]Set as default board[/cyan]")
+        console.print("  [cyan]Set as default board[/cyan]")
 
     if not config.is_multi_board:
         console.print()

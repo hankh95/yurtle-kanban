@@ -15,11 +15,12 @@ import json
 import logging
 import shlex
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 import yaml
 
@@ -56,9 +57,9 @@ class HookContext:
     item_id: str
     item_type: str  # expedition, chore, idea, hypothesis, etc.
     title: str = ""
-    old_status: Optional[str] = None
-    new_status: Optional[str] = None
-    assignee: Optional[str] = None
+    old_status: str | None = None
+    new_status: str | None = None
+    assignee: str | None = None
     forced: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
     timestamp: str = field(default="", init=False)

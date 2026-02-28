@@ -19,11 +19,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
+from rdflib import RDF, RDFS, Graph, Literal, Namespace, URIRef
 
 from .config import KanbanConfig
 from .hooks import HookContext, HookEngine, HookEvent
-
-from rdflib import RDF, RDFS, Graph, Literal, Namespace, URIRef
 
 if TYPE_CHECKING:
     from .config import BoardConfig
@@ -187,7 +186,10 @@ class KanbanService:
             # Parse resolution fields
             resolution = frontmatter.get("resolution")
             if resolution is not None:
-                valid_resolutions = {"completed", "superseded", "wont_do", "duplicate", "obsolete", "merged"}
+                valid_resolutions = {
+                    "completed", "superseded", "wont_do",
+                    "duplicate", "obsolete", "merged",
+                }
                 if resolution not in valid_resolutions:
                     logger.warning(
                         f"Unknown resolution '{resolution}' in {file_path}. "
@@ -626,11 +628,11 @@ class KanbanService:
             return self.repo_root / type_path
 
         # Priority 3: Match scan_paths by type keyword
-        _IRREGULAR_PLURALS = {
+        irregular_plurals = {
             "hypothesis": "hypotheses",
             "literature": "literature",
         }
-        plural = _IRREGULAR_PLURALS.get(item_type.value, item_type.value + "s")
+        plural = irregular_plurals.get(item_type.value, item_type.value + "s")
         for scan_path in self.config.paths.scan_paths:
             if plural in scan_path.lower() or item_type.value in scan_path.lower():
                 return self.repo_root / scan_path
@@ -873,7 +875,10 @@ class KanbanService:
                     "item": item,
                     "id": current_id,
                     "pushed": False,
-                    "message": f"Created and committed {current_id}: {title} (no remote configured)",
+                    "message": (
+                        f"Created and committed {current_id}: "
+                        f"{title} (no remote configured)"
+                    ),
                 }
 
             push_result = subprocess.run(
@@ -1166,10 +1171,10 @@ class KanbanService:
             Tuple of (new_content, changed). changed is False if the triple
             already exists or no subject was found.
         """
-        BASE = URIRef("urn:yurtle:block")
+        base_uri = URIRef("urn:yurtle:block")
         g = Graph()
         try:
-            g.parse(data=turtle_content, format="turtle", publicID=str(BASE))
+            g.parse(data=turtle_content, format="turtle", publicID=str(base_uri))
         except Exception as e:
             logger.warning(f"Failed to parse turtle block for modification: {e}")
             return turtle_content, False
@@ -1194,7 +1199,7 @@ class KanbanService:
             g.bind(name, Namespace(uri))
 
         # Serialize with base to preserve <#ID> relative URIs
-        result = g.serialize(format="turtle", base=BASE)
+        result = g.serialize(format="turtle", base=base_uri)
         if isinstance(result, bytes):
             result = result.decode("utf-8")
 
@@ -1211,10 +1216,10 @@ class KanbanService:
         Parses the existing block with rdflib, adds the missing triples,
         serializes back, and replaces the block in place.
         """
-        BASE = URIRef("urn:yurtle:block")
+        base_uri = URIRef("urn:yurtle:block")
         g = Graph()
         try:
-            g.parse(data=match.group(2), format="turtle", publicID=str(BASE))
+            g.parse(data=match.group(2), format="turtle", publicID=str(base_uri))
         except Exception as e:
             logger.warning(f"Failed to parse existing block for merge: {e}")
             # Fall back to inserting a new block
@@ -1228,7 +1233,7 @@ class KanbanService:
         # Bind prefixes and serialize
         for name, uri in PREFIXES.items():
             g.bind(name, Namespace(uri))
-        result = g.serialize(format="turtle", base=BASE)
+        result = g.serialize(format="turtle", base=base_uri)
         if isinstance(result, bytes):
             result = result.decode("utf-8")
         lines = result.strip().split("\n")
@@ -1454,7 +1459,7 @@ class KanbanService:
 
         Works on a copy to avoid mutating the caller's graph.
         """
-        BASE = URIRef("urn:yurtle:block")
+        base_uri = URIRef("urn:yurtle:block")
 
         # Work on a copy to avoid mutating the input graph
         work = Graph() + graph
@@ -1463,7 +1468,7 @@ class KanbanService:
         for name, uri in PREFIXES.items():
             work.bind(name, Namespace(uri))
 
-        result = work.serialize(format="turtle", base=BASE)
+        result = work.serialize(format="turtle", base=base_uri)
         if isinstance(result, bytes):
             result = result.decode("utf-8")
 
@@ -1487,7 +1492,10 @@ class KanbanService:
             return content + "\n\n" + block + "\n"
 
         after_frontmatter = parts[2]
-        return parts[0] + "---" + parts[1] + "---\n\n" + block + "\n" + after_frontmatter.lstrip("\n")
+        return (
+            parts[0] + "---" + parts[1] + "---\n\n"
+            + block + "\n" + after_frontmatter.lstrip("\n")
+        )
 
     def allocate_next_id(
         self,

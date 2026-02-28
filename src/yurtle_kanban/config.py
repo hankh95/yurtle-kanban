@@ -168,7 +168,10 @@ class KanbanConfig:
             abs_path = path.resolve()
 
         for board in self.boards:
-            board_path = (repo_root / board.path).resolve() if repo_root else Path(board.path).resolve()
+            if repo_root:
+                board_path = (repo_root / board.path).resolve()
+            else:
+                board_path = Path(board.path).resolve()
             try:
                 abs_path.relative_to(board_path)
                 return board
