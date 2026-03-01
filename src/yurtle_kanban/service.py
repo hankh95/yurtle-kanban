@@ -183,6 +183,15 @@ class KanbanService:
             # Extract description (content after frontmatter, before yurtle block)
             description = self._extract_description(content)
 
+            # Parse priority rank and value summary
+            priority_rank = frontmatter.get("priority_rank")
+            if priority_rank is not None:
+                try:
+                    priority_rank = int(priority_rank)
+                except (ValueError, TypeError):
+                    priority_rank = None
+            value_summary = frontmatter.get("value_summary")
+
             # Parse resolution fields
             resolution = frontmatter.get("resolution")
             if resolution is not None:
@@ -218,6 +227,8 @@ class KanbanService:
                 resolution=resolution,
                 superseded_by=superseded_by,
                 graph=graph,
+                priority_rank=priority_rank,
+                value_summary=value_summary,
             )
 
         except Exception as e:
@@ -2011,6 +2022,29 @@ class KanbanService:
             return "---".join(parts)
         return content
 
+    def _add_or_update_frontmatter_field(self, content: str, field: str, value: str) -> str:
+        """Add or update a field in the frontmatter.
+
+        If the field exists, update it. If not, insert it before the closing ---.
+        """
+        import re
+
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            return content
+
+        frontmatter = parts[1]
+        pattern = rf"^{field}:.*$"
+        if re.search(pattern, frontmatter, flags=re.MULTILINE):
+            # Field exists — update it
+            frontmatter = re.sub(pattern, f"{field}: {value}", frontmatter, flags=re.MULTILINE)
+        else:
+            # Field doesn't exist — append before end
+            frontmatter = frontmatter.rstrip() + f"\n{field}: {value}\n"
+
+        parts[1] = frontmatter
+        return "---".join(parts)
+
     def _git_commit(self, file_path: Path, message: str) -> None:
         """Commit changes to git."""
         try:
@@ -2316,3 +2350,66 @@ class KanbanService:
             )
 
         return item
+
+    def rank_item(
+        self,
+        item_id: str,
+        rank: int,
+        value_summary: str | None = None,
+        commit: bool = True,
+        message: str | None = None,
+    ) -> WorkItem:
+        """Set the priority rank for a work item.
+
+        Args:
+            item_id: The work item ID to rank
+            rank: Priority rank (lower = higher priority, 1 = top)
+            value_summary: Optional brief value statement
+            commit: Whether to git commit the change
+            message: Optional commit message
+        """
+        if rank < 1:
+            raise ValueError(f"Rank must be >= 1, got {rank}")
+
+        item = self.get_item(item_id)
+        if not item:
+            raise ValueError(f"Item not found: {item_id}")
+
+        item.priority_rank = rank
+        if value_summary is not None:
+            item.value_summary = value_summary
+
+        # Update file using field-level updates (preserves existing content)
+        content = item.file_path.read_text()
+        content = self._add_or_update_frontmatter_field(content, "priority_rank", str(rank))
+        if value_summary is not None:
+            escaped = value_summary.replace('"', '\\"')
+            content = self._add_or_update_frontmatter_field(
+                content, "value_summary", f'"{escaped}"'
+            )
+        item.file_path.write_text(content)
+
+        if commit:
+            self._git_commit(
+                item.file_path,
+                message or f"Rank {item_id} as #{rank}",
+            )
+
+        return item
+
+    def get_ranked_items(self, status: WorkItemStatus | None = None) -> list[WorkItem]:
+        """Get items sorted by priority_rank (ranked items first, then by priority_score).
+
+        Items with priority_rank are sorted ascending (1 = highest).
+        Items without priority_rank follow, sorted by priority_score descending.
+        """
+        items = self.get_items(status=status)
+        items = [i for i in items if i.status != WorkItemStatus.DONE]
+
+        ranked = [i for i in items if i.priority_rank is not None]
+        unranked = [i for i in items if i.priority_rank is None]
+
+        ranked.sort(key=lambda i: i.priority_rank)
+        # unranked already sorted by priority_score from get_items()
+
+        return ranked + unranked
