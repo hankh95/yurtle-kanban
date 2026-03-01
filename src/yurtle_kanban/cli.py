@@ -89,10 +89,21 @@ def get_service() -> KanbanService:
     """Get the kanban service for the current directory."""
     repo_root = Path.cwd()
 
-    # Find .kanban/config.yaml
-    config_path = repo_root / ".kanban" / "config.yaml"
+    # Check for config in priority order:
+    # 1. .yurtle-kanban/config.yaml (preferred)
+    # 2. .kanban/config.yaml (legacy/fallback)
+    config_paths = [
+        repo_root / ".yurtle-kanban" / "config.yaml",
+        repo_root / ".kanban" / "config.yaml",
+    ]
 
-    if config_path.exists():
+    config_path = None
+    for path in config_paths:
+        if path.exists():
+            config_path = path
+            break
+
+    if config_path:
         config = KanbanConfig.load(config_path)
     else:
         config = KanbanConfig()  # Use defaults
