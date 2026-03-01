@@ -2,17 +2,16 @@
 Tests for multi-board configuration support.
 """
 
-import pytest
 from pathlib import Path
-import tempfile
-import shutil
+
+import pytest
 
 from yurtle_kanban.config import (
-    KanbanConfig,
-    BoardConfig,
-    PathConfig,
-    CONFIG_VERSION_SINGLE,
     CONFIG_VERSION_MULTI,
+    CONFIG_VERSION_SINGLE,
+    BoardConfig,
+    KanbanConfig,
+    PathConfig,
 )
 from yurtle_kanban.service import KanbanService
 
@@ -452,7 +451,6 @@ default_board: development
         from yurtle_kanban.models import WorkItemType
 
         service = multiboard_hdd_setup["service"]
-        tmp_path = multiboard_hdd_setup["tmp_path"]
 
         item = service.create_item(
             item_type=WorkItemType.HYPOTHESIS,
@@ -951,7 +949,6 @@ status: backlog
     def test_reverse_status_mapping_hdd(self, hdd_state_setup):
         """Test _get_reverse_status_mapping for HDD board."""
         service = hdd_state_setup["service"]
-        from yurtle_kanban.config import BoardConfig
 
         board = service.config.get_board("research")
         mapping = service._get_reverse_status_mapping(board)
@@ -965,16 +962,29 @@ status: backlog
         """Test _get_reverse_status_mapping returns empty for non-HDD board."""
         service = hdd_state_setup["service"]
 
-        # Nautical preset doesn't have status_mappings defined
+        # Nautical preset has no status_mappings → empty reverse mapping
         board = service.config.get_board("development")
         mapping = service._get_reverse_status_mapping(board)
 
-        # Nautical doesn't define a reverse mapping (uses canonical names)
-        # Actually let me check... nautical.yaml may have status_mappings
-        # If it doesn't, this should return empty
-        # The mapping may have some values if nautical defines them
-        # For this test, we mainly care that HDD works correctly
-        pass  # Nautical behavior is tested separately
+        assert mapping == {}
+
+    def test_move_hdd_item_to_abandoned_writes_abandoned(self, hdd_state_setup):
+        """Moving an HDD item to 'abandoned' should write native name."""
+        from yurtle_kanban.models import WorkItemStatus
+
+        service = hdd_state_setup["service"]
+        hyp_file = hdd_state_setup["hyp_file"]
+
+        # draft→abandoned is valid in HDD transitions
+        item = service.move_item(
+            "H130.1", WorkItemStatus.BLOCKED, commit=False,
+            validate_workflow=True,
+        )
+        assert item.status == WorkItemStatus.BLOCKED
+
+        content = hyp_file.read_text()
+        assert "status: abandoned" in content
+        assert "status: blocked" not in content
 
     def test_board_transitions_hdd(self, hdd_state_setup):
         """Test _get_board_transitions returns HDD-specific transitions."""

@@ -82,42 +82,58 @@ class KanbanService:
         )
         self._hook_engine.set_callback("create_item", self._hook_create_item)
 
-    def _get_board_for_item(self, item: WorkItem) -> "BoardConfig | None":
+    def _get_board_for_item(self, item: WorkItem) -> BoardConfig | None:
         """Get the board configuration for a work item."""
         if not self.config.is_multi_board or not item.file_path:
             return None
         return self.config.get_board_for_path(item.file_path, self.repo_root)
 
-    def _get_reverse_status_mapping(self, board_config: "BoardConfig | None") -> dict[str, str]:
-        """Get reverse mapping from canonical status to board-native name.
+    def _load_board_theme(
+        self, board_config: BoardConfig | None,
+    ) -> dict | None:
+        """Load the theme for a board configuration.
 
-        For HDD board: {'backlog': 'draft', 'in_progress': 'active', 'done': 'complete', 'blocked': 'abandoned'}
-        For nautical or no board: returns empty dict (use canonical names).
-        """
-        if not board_config:
-            return {}
-
-        from .config import _load_builtin_theme
-
-        theme = _load_builtin_theme(board_config.preset, self.repo_root)
-        if not theme or "status_mappings" not in theme:
-            return {}
-
-        # Invert the mapping: {native: canonical} -> {canonical: native}
-        return {canonical: native for native, canonical in theme["status_mappings"].items()}
-
-    def _get_board_transitions(self, board_config: "BoardConfig | None") -> dict[str, list[str]] | None:
-        """Get board-specific state transitions.
-
-        Returns the transitions dict from the board's theme, or None if not defined.
-        For HDD: {'draft': ['active', 'abandoned'], 'active': ['complete', 'abandoned', 'draft'], ...}
+        Returns the full theme dict, or None if no board or no theme.
+        Centralises theme loading so callers don't duplicate the work.
         """
         if not board_config:
             return None
 
         from .config import _load_builtin_theme
 
-        theme = _load_builtin_theme(board_config.preset, self.repo_root)
+        return _load_builtin_theme(board_config.preset, self.repo_root)
+
+    def _get_reverse_status_mapping(
+        self, board_config: BoardConfig | None,
+        theme: dict | None = None,
+    ) -> dict[str, str]:
+        """Get reverse mapping from canonical status to board-native name.
+
+        For HDD: ``{backlog: draft, in_progress: active, ...}``
+        For nautical or no board: returns empty dict.
+        """
+        if theme is None:
+            theme = self._load_board_theme(board_config)
+        if not theme or "status_mappings" not in theme:
+            return {}
+
+        # Invert: {native: canonical} -> {canonical: native}
+        return {
+            canonical: native
+            for native, canonical in theme["status_mappings"].items()
+        }
+
+    def _get_board_transitions(
+        self, board_config: BoardConfig | None,
+        theme: dict | None = None,
+    ) -> dict[str, list[str]] | None:
+        """Get board-specific state transitions.
+
+        Returns the transitions dict from the board's theme, or None
+        if not defined.
+        """
+        if theme is None:
+            theme = self._load_board_theme(board_config)
         if not theme or "transitions" not in theme:
             return None
 
@@ -1880,14 +1896,19 @@ class KanbanService:
         """
         # Check board-specific transitions first (e.g., HDD theme)
         board_config = self._get_board_for_item(item)
-        board_transitions = self._get_board_transitions(board_config)
+        theme = self._load_board_theme(board_config)
+        board_transitions = self._get_board_transitions(board_config, theme)
 
         if board_transitions:
-            # Use board-specific transitions (maps native names to allowed transitions)
-            # Need to convert canonical status to native name for lookup
-            reverse_mapping = self._get_reverse_status_mapping(board_config)
-            from_native = reverse_mapping.get(item.status.value, item.status.value)
-            to_native = reverse_mapping.get(new_status.value, new_status.value)
+            reverse_mapping = self._get_reverse_status_mapping(
+                board_config, theme,
+            )
+            from_native = reverse_mapping.get(
+                item.status.value, item.status.value,
+            )
+            to_native = reverse_mapping.get(
+                new_status.value, new_status.value,
+            )
 
             allowed = board_transitions.get(from_native, [])
             if to_native in allowed:
@@ -2013,10 +2034,15 @@ class KanbanService:
         """
         content = item.file_path.read_text()
 
-        # Determine board-native status name (e.g., 'active' for HDD instead of 'in_progress')
+        # Determine board-native status name (e.g., 'active' for HDD)
         board_config = self._get_board_for_item(item)
-        reverse_mapping = self._get_reverse_status_mapping(board_config)
-        native_status = reverse_mapping.get(new_status.value, new_status.value)
+        theme = self._load_board_theme(board_config)
+        reverse_mapping = self._get_reverse_status_mapping(
+            board_config, theme,
+        )
+        native_status = reverse_mapping.get(
+            new_status.value, new_status.value,
+        )
 
         # Update frontmatter for status and assignee (use board-native name)
         content = self._update_frontmatter_field(content, "status", native_status)

@@ -110,7 +110,10 @@ def hdd_backfill(dry_run):
 
 
 @hdd.command("registry")
-@click.option("--output", "output_path", default=None, help="Output file path (default: research/REGISTRY.md)")
+@click.option(
+    "--output", "output_path", default=None,
+    help="Output file path (default: research/REGISTRY.md)",
+)
 @click.option("--push", is_flag=True, help="Commit and push the registry file")
 def hdd_registry(output_path: str | None, push: bool):
     """Auto-generate a research registry from all HDD items.
@@ -172,8 +175,10 @@ def hdd_registry(output_path: str | None, push: bool):
         lines.append("| ID | Hypothesis | Status | Runs | Last Outcome |")
         lines.append("|----|------------|--------|------|--------------|")
         for e in experiments:
+            outcome = e['last_outcome'] or '—'
             lines.append(
-                f"| {e['id']} | {e['hypothesis']} | {e['status']} | {e['runs']} | {e['last_outcome'] or '—'} |"
+                f"| {e['id']} | {e['hypothesis']} "
+                f"| {e['status']} | {e['runs']} | {outcome} |"
             )
     else:
         lines.append("No experiments found.")
@@ -298,7 +303,8 @@ def hdd_validate(strict: bool, as_json: bool):
     exp_warns = [w for w in report["warnings"] if "experiment" in w.get("issue", "")]
     exp_errs = [e for e in report["errors"] if e["id"].startswith("EXPR")]
     if not exp_warns and not exp_errs:
-        console.print(f"  [green]OK[/green] {s['experiments']} experiments — all linked to hypotheses")
+        msg = f"{s['experiments']} experiments — all linked to hypotheses"
+        console.print(f"  [green]OK[/green] {msg}")
     else:
         console.print(f"  [yellow]!![/yellow] {s['experiments']} experiments")
         for w in exp_warns:
@@ -312,7 +318,11 @@ def hdd_validate(strict: bool, as_json: bool):
         console.print(f"  [green]OK[/green] {s['measures']} measures — all referenced")
     else:
         referenced = s["measures"] - len(measure_warns)
-        console.print(f"  [yellow]!![/yellow] {s['measures']} measures — {referenced} referenced, {len(measure_warns)} unused")
+        unused = len(measure_warns)
+        console.print(
+            f"  [yellow]!![/yellow] {s['measures']} measures"
+            f" — {referenced} referenced, {unused} unused"
+        )
         for w in measure_warns:
             console.print(f"    [yellow]Warning:[/yellow] {w['id']}: {w['issue']}")
 
@@ -749,10 +759,16 @@ def experiment_create(
 @experiment.command("run")
 @click.argument("expr_id")
 @click.option("--being", required=True, help="Being name/version (e.g., santiago-toddler-v12.4)")
-@click.option("--params", "params_str", default=None, help="Comma-separated key=value pairs (e.g., 'kbdd_rounds=3,wikidata=true')")
+@click.option(
+    "--params", "params_str", default=None,
+    help="Comma-separated key=value pairs (e.g., 'kbdd_rounds=3,wikidata=true')",
+)
 @click.option("--run-by", default=None, help="Who started the run (default: git user.name)")
 @click.option("--push", is_flag=True, help="Atomic: commit and push the config.yaml")
-def experiment_run(expr_id: str, being: str, params_str: str | None, run_by: str | None, push: bool):
+def experiment_run(
+    expr_id: str, being: str, params_str: str | None,
+    run_by: str | None, push: bool,
+):
     """Create a new experiment run with a timestamped folder.
 
     Creates research/runs/EXPR-ID/TIMESTAMP/config.yaml with run metadata.
