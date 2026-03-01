@@ -687,7 +687,10 @@ def stats():
 @click.option("--ranked", is_flag=True, help="Sort by priority_rank (Captain's order)")
 @click.option("--export", "-e", "export_fmt", type=click.Choice(["md"]), help="Export as markdown")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
-def roadmap(by_type: bool, item_type: str | None, ranked: bool, export_fmt: str | None, as_json: bool):
+def roadmap(
+    by_type: bool, item_type: str | None, ranked: bool,
+    export_fmt: str | None, as_json: bool,
+):
     """Show a prioritized roadmap of all work items.
 
     Displays all non-done items sorted by priority (critical first).
@@ -728,9 +731,14 @@ def roadmap(by_type: bool, item_type: str | None, ranked: bool, export_fmt: str 
         for i, item in enumerate(items, 1):
             priority = item.priority or "medium"
             assignee = item.assignee or "unassigned"
-            rank_str = f" [rank:{item.priority_rank}]" if item.priority_rank is not None else ""
+            if item.priority_rank is not None:
+                rank_str = f" [rank:{item.priority_rank}]"
+            else:
+                rank_str = ""
             lines.append(
-                f"{i}. **{item.id}**: {item.title} [{priority}]{rank_str} ({item.status.value}) @{assignee}"
+                f"{i}. **{item.id}**: {item.title} "
+                f"[{priority}]{rank_str} "
+                f"({item.status.value}) @{assignee}"
             )
         click.echo("\n".join(lines))
     else:

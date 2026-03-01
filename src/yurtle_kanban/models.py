@@ -271,7 +271,8 @@ class WorkItem:
         if self.priority_rank is not None:
             lines.append(f"priority_rank: {self.priority_rank}")
         if self.value_summary:
-            lines.append(f'value_summary: "{self.value_summary}"')
+            escaped = self.value_summary.replace('"', '\\"')
+            lines.append(f'value_summary: "{escaped}"')
 
         if self.resolution:
             lines.append(f"resolution: {self.resolution}")

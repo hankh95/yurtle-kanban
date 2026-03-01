@@ -2325,6 +2325,9 @@ class KanbanService:
             commit: Whether to git commit the change
             message: Optional commit message
         """
+        if rank < 1:
+            raise ValueError(f"Rank must be >= 1, got {rank}")
+
         item = self.get_item(item_id)
         if not item:
             raise ValueError(f"Item not found: {item_id}")
@@ -2337,8 +2340,9 @@ class KanbanService:
         content = item.file_path.read_text()
         content = self._add_or_update_frontmatter_field(content, "priority_rank", str(rank))
         if value_summary is not None:
+            escaped = value_summary.replace('"', '\\"')
             content = self._add_or_update_frontmatter_field(
-                content, "value_summary", f'"{value_summary}"'
+                content, "value_summary", f'"{escaped}"'
             )
         item.file_path.write_text(content)
 
