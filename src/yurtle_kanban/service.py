@@ -2413,3 +2413,388 @@ class KanbanService:
         # unranked already sorted by priority_score from get_items()
 
         return ranked + unranked
+
+    # ------------------------------------------------------------------
+    # Experiment run tracking (Phase 3)
+    # ------------------------------------------------------------------
+
+    def create_experiment_run(
+        self,
+        expr_id: str,
+        being: str,
+        params: dict[str, str] | None = None,
+        run_by: str | None = None,
+    ) -> Path:
+        """Create a timestamped experiment run folder with config.yaml.
+
+        Args:
+            expr_id: Experiment ID (e.g., EXPR-130)
+            being: Being name/version (e.g., santiago-toddler-v12.4)
+            params: Optional key=value parameters
+            run_by: Who started the run (default: git user.name)
+
+        Returns:
+            Path to the created run folder.
+        """
+        # Resolve run_by from git config if not provided
+        if run_by is None:
+            try:
+                result = subprocess.run(
+                    ["git", "config", "user.name"],
+                    cwd=self.repo_root,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                run_by = result.stdout.strip() or "unknown"
+            except subprocess.CalledProcessError:
+                run_by = "unknown"
+
+        # Look up the experiment to get hypothesis link
+        item = self.get_item(expr_id)
+        hypothesis = ""
+        if item and item.file_path and item.file_path.exists():
+            content = item.file_path.read_text()
+            fm = self._parse_frontmatter(content)
+            hypothesis = fm.get("hypothesis", "")
+
+        # Create timestamped folder (microseconds to avoid collisions)
+        now = datetime.now()
+        timestamp = now.strftime("%Y-%m-%dT%H%M%S") + f"-{now.microsecond:06d}"
+        runs_dir = self.repo_root / "research" / "runs" / expr_id / timestamp
+        runs_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write config.yaml
+        config_data: dict[str, Any] = {
+            "experiment": expr_id,
+            "hypothesis": hypothesis,
+            "being": being,
+            "created": now.isoformat(timespec="seconds"),
+            "run_by": run_by,
+            "status": "running",
+        }
+        if params:
+            config_data["params"] = params
+
+        config_path = runs_dir / "config.yaml"
+        config_path.write_text(yaml.dump(config_data, default_flow_style=False, sort_keys=False))
+
+        return runs_dir
+
+    def get_experiment_runs(self, expr_id: str) -> list[dict[str, Any]]:
+        """Get all runs for an experiment, sorted by date descending.
+
+        Args:
+            expr_id: Experiment ID (e.g., EXPR-130)
+
+        Returns:
+            List of run metadata dicts with keys: timestamp, being, status,
+            outcome, run_by, params, run_path.
+        """
+        runs_base = self.repo_root / "research" / "runs" / expr_id
+        if not runs_base.exists():
+            return []
+
+        runs = []
+        for run_dir in sorted(runs_base.iterdir(), reverse=True):
+            if not run_dir.is_dir():
+                continue
+            config_path = run_dir / "config.yaml"
+            if not config_path.exists():
+                continue
+
+            try:
+                config_data = yaml.safe_load(config_path.read_text()) or {}
+            except yaml.YAMLError:
+                continue
+
+            run_info: dict[str, Any] = {
+                "timestamp": config_data.get("created", run_dir.name),
+                "being": config_data.get("being", ""),
+                "status": config_data.get("status", "unknown"),
+                "run_by": config_data.get("run_by", ""),
+                "params": config_data.get("params", {}),
+                "run_path": run_dir,
+            }
+
+            # Check for metrics.json
+            metrics_path = run_dir / "metrics.json"
+            if metrics_path.exists():
+                import json
+
+                try:
+                    metrics = json.loads(metrics_path.read_text())
+                    run_info["outcome"] = metrics.get("outcome", "")
+                    run_info["summary"] = metrics.get("summary", "")
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            runs.append(run_info)
+
+        return runs
+
+    def update_run_status(
+        self,
+        run_path: Path,
+        status: str,
+        outcome: str | None = None,
+    ) -> None:
+        """Update the status (and optionally outcome) of an experiment run.
+
+        Args:
+            run_path: Path to the run folder
+            status: New status (e.g., "running", "complete", "failed")
+            outcome: Optional outcome string (e.g., "VALIDATED", "REFUTED")
+        """
+        config_path = run_path / "config.yaml"
+        if not config_path.exists():
+            raise FileNotFoundError(f"No config.yaml in {run_path}")
+
+        config_data = yaml.safe_load(config_path.read_text()) or {}
+        config_data["status"] = status
+        if outcome is not None:
+            config_data["outcome"] = outcome
+
+        config_path.write_text(
+            yaml.dump(config_data, default_flow_style=False, sort_keys=False)
+        )
+
+    # ------------------------------------------------------------------
+    # HDD Registry & Validation (Phase 4)
+    # ------------------------------------------------------------------
+
+    def _get_hdd_frontmatter(self, item: WorkItem) -> dict[str, Any]:
+        """Read raw frontmatter for an HDD item (includes paper, hypothesis, etc.)."""
+        if not item.file_path or not item.file_path.exists():
+            return {}
+        content = item.file_path.read_text()
+        return self._parse_frontmatter(content) or {}
+
+    def get_hdd_cross_references(self) -> dict[str, Any]:
+        """Build a full cross-reference map of all HDD items.
+
+        Returns a dict with keys: papers, hypotheses, experiments, measures,
+        ideas, literature, orphaned. Each value is a list of dicts.
+        """
+        hdd_types = {
+            WorkItemType.PAPER, WorkItemType.HYPOTHESIS, WorkItemType.EXPERIMENT,
+            WorkItemType.MEASURE, WorkItemType.IDEA, WorkItemType.LITERATURE,
+        }
+        all_items = self.get_items()
+        hdd_items = [i for i in all_items if i.item_type in hdd_types]
+
+        # Group by type
+        by_type: dict[str, list[WorkItem]] = {
+            "paper": [], "hypothesis": [], "experiment": [],
+            "measure": [], "idea": [], "literature": [],
+        }
+        for item in hdd_items:
+            type_key = item.item_type.value
+            if type_key in by_type:
+                by_type[type_key].append(item)
+
+        # Build cross-reference maps
+        # Paper → hypotheses
+        paper_hyps: dict[str, list[str]] = {}
+        # Hypothesis → experiments
+        hyp_exps: dict[str, list[str]] = {}
+        # Hypothesis → paper
+        hyp_paper: dict[str, str] = {}
+        # Experiment → hypothesis
+        exp_hyp: dict[str, str] = {}
+        # Idea → literature
+        idea_lits: dict[str, list[str]] = {}
+        # Literature → idea
+        lit_idea: dict[str, str] = {}
+
+        for item in by_type["hypothesis"]:
+            fm = self._get_hdd_frontmatter(item)
+            paper_ref = fm.get("paper", "")
+            if paper_ref:
+                paper_id = str(paper_ref)
+                if not paper_id.startswith("PAPER-"):
+                    paper_id = f"PAPER-{paper_id}"
+                hyp_paper[item.id] = paper_id
+                paper_hyps.setdefault(paper_id, []).append(item.id)
+
+        for item in by_type["experiment"]:
+            fm = self._get_hdd_frontmatter(item)
+            hyp_ref = fm.get("hypothesis", "")
+            if hyp_ref:
+                exp_hyp[item.id] = str(hyp_ref)
+                hyp_exps.setdefault(str(hyp_ref), []).append(item.id)
+
+        for item in by_type["literature"]:
+            fm = self._get_hdd_frontmatter(item)
+            idea_ref = fm.get("source_idea", "") or fm.get("idea", "")
+            if idea_ref:
+                lit_idea[item.id] = str(idea_ref)
+                idea_lits.setdefault(str(idea_ref), []).append(item.id)
+
+        # Build result
+        result: dict[str, Any] = {
+            "papers": [],
+            "hypotheses": [],
+            "experiments": [],
+            "measures": [],
+            "ideas": [],
+            "literature": [],
+            "orphaned": [],
+        }
+
+        for p in by_type["paper"]:
+            result["papers"].append({
+                "id": p.id, "title": p.title, "status": p.status.value,
+                "hypotheses": paper_hyps.get(p.id, []),
+            })
+
+        for h in by_type["hypothesis"]:
+            fm = self._get_hdd_frontmatter(h)
+            result["hypotheses"].append({
+                "id": h.id, "title": h.title, "status": h.status.value,
+                "paper": hyp_paper.get(h.id, ""),
+                "target": fm.get("target", ""),
+                "experiments": hyp_exps.get(h.id, []),
+            })
+
+        for e in by_type["experiment"]:
+            runs = self.get_experiment_runs(e.id)
+            last_outcome = ""
+            if runs:
+                last_outcome = runs[0].get("outcome", runs[0].get("summary", ""))
+            result["experiments"].append({
+                "id": e.id, "title": e.title, "status": e.status.value,
+                "hypothesis": exp_hyp.get(e.id, ""),
+                "runs": len(runs),
+                "last_outcome": last_outcome,
+            })
+
+        for m in by_type["measure"]:
+            fm = self._get_hdd_frontmatter(m)
+            result["measures"].append({
+                "id": m.id, "title": m.title,
+                "unit": fm.get("unit", ""),
+                "category": fm.get("category", ""),
+            })
+
+        for idea_item in by_type["idea"]:
+            result["ideas"].append({
+                "id": idea_item.id, "title": idea_item.title,
+                "status": idea_item.status.value,
+                "literature": idea_lits.get(idea_item.id, []),
+            })
+
+        for lit in by_type["literature"]:
+            result["literature"].append({
+                "id": lit.id, "title": lit.title, "status": lit.status.value,
+                "idea": lit_idea.get(lit.id, ""),
+            })
+
+        # Orphaned items: hypotheses without paper, experiments without hypothesis
+        for h in by_type["hypothesis"]:
+            paper = hyp_paper.get(h.id, "")
+            if not paper and not h.id.startswith("H-DRAFT"):
+                result["orphaned"].append({
+                    "id": h.id, "reason": "No paper assignment",
+                })
+        for e in by_type["experiment"]:
+            hyp = exp_hyp.get(e.id, "")
+            if not hyp:
+                result["orphaned"].append({
+                    "id": e.id, "reason": "No hypothesis link",
+                })
+
+        return result
+
+    def validate_hdd_links(self) -> dict[str, Any]:
+        """Validate bidirectional links between HDD items.
+
+        Returns a validation report dict with keys: errors, warnings, summary.
+        """
+        xrefs = self.get_hdd_cross_references()
+
+        # Collect all known IDs
+        all_ids: set[str] = set()
+        for section in ("papers", "hypotheses", "experiments", "measures", "ideas", "literature"):
+            for item in xrefs[section]:
+                all_ids.add(item["id"])
+
+        errors: list[dict[str, str]] = []
+        warnings: list[dict[str, str]] = []
+
+        # Check hypotheses → paper links
+        for h in xrefs["hypotheses"]:
+            paper = h.get("paper", "")
+            if not paper:
+                if not h["id"].startswith("H-DRAFT"):
+                    warnings.append({
+                        "id": h["id"],
+                        "issue": "hypothesis missing paper link",
+                    })
+            elif paper not in all_ids:
+                errors.append({
+                    "id": h["id"],
+                    "issue": f"references {paper} (not found)",
+                })
+
+        # Check experiments → hypothesis links
+        for e in xrefs["experiments"]:
+            hyp = e.get("hypothesis", "")
+            if not hyp:
+                warnings.append({
+                    "id": e["id"],
+                    "issue": "experiment missing hypothesis link",
+                })
+            elif hyp not in all_ids:
+                errors.append({
+                    "id": e["id"],
+                    "issue": f"references {hyp} (not found)",
+                })
+
+        # Check literature → idea links (warning, not error)
+        for lit in xrefs["literature"]:
+            idea = lit.get("idea", "")
+            if idea and idea not in all_ids:
+                warnings.append({
+                    "id": lit["id"],
+                    "issue": f"references {idea} (not found)",
+                })
+
+        # Check for unused measures
+        used_measures: set[str] = set()
+        for h in xrefs["hypotheses"]:
+            item = self.get_item(h["id"])
+            if item and item.graph:
+                for triple_obj in item.get_knowledge_triples(_HYP.measuredBy):
+                    # Extract measure ID from URI
+                    obj_str = str(triple_obj)
+                    if "/" in obj_str:
+                        used_measures.add(obj_str.split("/")[-1])
+                    else:
+                        used_measures.add(obj_str)
+
+        for m in xrefs["measures"]:
+            if m["id"] not in used_measures:
+                warnings.append({
+                    "id": m["id"],
+                    "issue": "measure not referenced by any hypothesis",
+                })
+
+        summary = {
+            "papers": len(xrefs["papers"]),
+            "hypotheses": len(xrefs["hypotheses"]),
+            "experiments": len(xrefs["experiments"]),
+            "measures": len(xrefs["measures"]),
+            "ideas": len(xrefs["ideas"]),
+            "literature": len(xrefs["literature"]),
+            "errors": len(errors),
+            "warnings": len(warnings),
+            "orphaned": len(xrefs["orphaned"]),
+        }
+
+        return {
+            "errors": errors,
+            "warnings": warnings,
+            "orphaned": xrefs["orphaned"],
+            "summary": summary,
+        }

@@ -919,3 +919,630 @@ class TestParentAutoUpdate:
         hyp_dir = temp_repo / "research" / "hypotheses"
         files = list(hyp_dir.glob("H999.1*.md"))
         assert len(files) == 1
+
+
+# ---------------------------------------------------------------------------
+# TestExperimentRun
+# ---------------------------------------------------------------------------
+
+
+class TestExperimentRun:
+    """Tests for 'yurtle-kanban experiment run'."""
+
+    def test_experiment_run_creates_folder(self, runner, temp_repo, hdd_config):
+        """experiment run should create a timestamped folder with config.yaml."""
+        result = runner.invoke(
+            main,
+            ["experiment", "run", "EXPR-130", "--being", "santiago-toddler-v12.4"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        assert "Created run for EXPR-130" in result.output
+
+        # Verify folder structure
+        runs_dir = temp_repo / "research" / "runs" / "EXPR-130"
+        assert runs_dir.exists()
+        run_folders = list(runs_dir.iterdir())
+        assert len(run_folders) == 1
+        config_path = run_folders[0] / "config.yaml"
+        assert config_path.exists()
+
+    def test_experiment_run_config_contents(self, runner, temp_repo, hdd_config):
+        """config.yaml should contain experiment, being, and status fields."""
+        runner.invoke(
+            main,
+            ["experiment", "run", "EXPR-130", "--being", "test-being-v12"],
+            catch_exceptions=False,
+        )
+
+        runs_dir = temp_repo / "research" / "runs" / "EXPR-130"
+        run_folders = list(runs_dir.iterdir())
+        config_path = run_folders[0] / "config.yaml"
+        config = yaml.safe_load(config_path.read_text())
+
+        assert config["experiment"] == "EXPR-130"
+        assert config["being"] == "test-being-v12"
+        assert config["status"] == "running"
+        assert "created" in config
+
+    def test_experiment_run_with_params(self, runner, temp_repo, hdd_config):
+        """--params should be parsed into config.yaml params dict."""
+        runner.invoke(
+            main,
+            [
+                "experiment", "run", "EXPR-130",
+                "--being", "test-being",
+                "--params", "kbdd_rounds=3,wikidata=true",
+            ],
+            catch_exceptions=False,
+        )
+
+        runs_dir = temp_repo / "research" / "runs" / "EXPR-130"
+        run_folders = list(runs_dir.iterdir())
+        config = yaml.safe_load((run_folders[0] / "config.yaml").read_text())
+
+        assert config["params"]["kbdd_rounds"] == "3"
+        assert config["params"]["wikidata"] == "true"
+
+    def test_experiment_run_auto_prefixes(self, runner, temp_repo, hdd_config):
+        """ID without EXPR- prefix should be normalized."""
+        result = runner.invoke(
+            main,
+            ["experiment", "run", "130", "--being", "test-being"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "EXPR-130" in result.output
+
+    def test_experiment_run_with_run_by(self, runner, temp_repo, hdd_config):
+        """--run-by should be stored in config.yaml."""
+        runner.invoke(
+            main,
+            [
+                "experiment", "run", "EXPR-130",
+                "--being", "test-being",
+                "--run-by", "Mini",
+            ],
+            catch_exceptions=False,
+        )
+
+        runs_dir = temp_repo / "research" / "runs" / "EXPR-130"
+        run_folders = list(runs_dir.iterdir())
+        config = yaml.safe_load((run_folders[0] / "config.yaml").read_text())
+        assert config["run_by"] == "Mini"
+
+
+# ---------------------------------------------------------------------------
+# TestExperimentStatus
+# ---------------------------------------------------------------------------
+
+
+class TestExperimentStatus:
+    """Tests for 'yurtle-kanban experiment status'."""
+
+    def test_status_no_runs(self, runner, temp_repo, hdd_config):
+        """Status with no runs should show informative message."""
+        result = runner.invoke(
+            main,
+            ["experiment", "status", "EXPR-130"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "No runs found" in result.output
+
+    def test_status_shows_runs(self, runner, temp_repo, hdd_config):
+        """Status should show a table of existing runs."""
+        # Create two runs
+        runner.invoke(
+            main,
+            ["experiment", "run", "EXPR-130", "--being", "being-v1"],
+            catch_exceptions=False,
+        )
+        runner.invoke(
+            main,
+            ["experiment", "run", "EXPR-130", "--being", "being-v2"],
+            catch_exceptions=False,
+        )
+
+        result = runner.invoke(
+            main,
+            ["experiment", "status", "EXPR-130"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "being-v1" in result.output
+        assert "being-v2" in result.output
+
+    def test_status_json_output(self, runner, temp_repo, hdd_config):
+        """--json should output valid JSON."""
+        import json
+
+        runner.invoke(
+            main,
+            ["experiment", "run", "EXPR-130", "--being", "test-being"],
+            catch_exceptions=False,
+        )
+
+        result = runner.invoke(
+            main,
+            ["experiment", "status", "EXPR-130", "--json"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["being"] == "test-being"
+        assert data[0]["status"] == "running"
+
+    def test_status_auto_prefixes(self, runner, temp_repo, hdd_config):
+        """ID without EXPR- prefix should be normalized."""
+        runner.invoke(
+            main,
+            ["experiment", "run", "EXPR-130", "--being", "test-being"],
+            catch_exceptions=False,
+        )
+        result = runner.invoke(
+            main,
+            ["experiment", "status", "130"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "test-being" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestExperimentRunService
+# ---------------------------------------------------------------------------
+
+
+class TestExperimentRunService:
+    """Tests for KanbanService experiment run methods."""
+
+    def test_create_experiment_run(self, temp_repo, hdd_config):
+        """create_experiment_run should create folder and config.yaml."""
+        service = KanbanService(hdd_config, temp_repo)
+        run_path = service.create_experiment_run(
+            expr_id="EXPR-130",
+            being="test-being-v12",
+            params={"rounds": "3"},
+            run_by="TestAgent",
+        )
+
+        assert run_path.exists()
+        config = yaml.safe_load((run_path / "config.yaml").read_text())
+        assert config["experiment"] == "EXPR-130"
+        assert config["being"] == "test-being-v12"
+        assert config["run_by"] == "TestAgent"
+        assert config["params"]["rounds"] == "3"
+        assert config["status"] == "running"
+
+    def test_get_experiment_runs_empty(self, temp_repo, hdd_config):
+        """get_experiment_runs should return empty list for non-existent experiment."""
+        service = KanbanService(hdd_config, temp_repo)
+        runs = service.get_experiment_runs("EXPR-999")
+        assert runs == []
+
+    def test_get_experiment_runs_returns_metadata(self, temp_repo, hdd_config):
+        """get_experiment_runs should return run metadata."""
+        service = KanbanService(hdd_config, temp_repo)
+        service.create_experiment_run(
+            expr_id="EXPR-130",
+            being="test-being",
+            run_by="Agent",
+        )
+
+        runs = service.get_experiment_runs("EXPR-130")
+        assert len(runs) == 1
+        assert runs[0]["being"] == "test-being"
+        assert runs[0]["status"] == "running"
+
+    def test_update_run_status(self, temp_repo, hdd_config):
+        """update_run_status should modify config.yaml."""
+        service = KanbanService(hdd_config, temp_repo)
+        run_path = service.create_experiment_run(
+            expr_id="EXPR-130",
+            being="test-being",
+        )
+
+        service.update_run_status(run_path, "complete", outcome="VALIDATED")
+
+        config = yaml.safe_load((run_path / "config.yaml").read_text())
+        assert config["status"] == "complete"
+        assert config["outcome"] == "VALIDATED"
+
+    def test_update_run_status_missing_folder(self, temp_repo, hdd_config):
+        """update_run_status should raise on missing config.yaml."""
+        service = KanbanService(hdd_config, temp_repo)
+        with pytest.raises(FileNotFoundError):
+            service.update_run_status(temp_repo / "nonexistent", "complete")
+
+    def test_get_experiment_runs_with_metrics(self, temp_repo, hdd_config):
+        """Runs with metrics.json should include outcome in metadata."""
+        import json
+
+        service = KanbanService(hdd_config, temp_repo)
+        run_path = service.create_experiment_run(
+            expr_id="EXPR-130",
+            being="test-being",
+        )
+
+        # Write metrics.json
+        metrics = {"outcome": "VALIDATED", "summary": "85.2% accuracy"}
+        (run_path / "metrics.json").write_text(json.dumps(metrics))
+
+        runs = service.get_experiment_runs("EXPR-130")
+        assert len(runs) == 1
+        assert runs[0]["outcome"] == "VALIDATED"
+        assert runs[0]["summary"] == "85.2% accuracy"
+
+
+# ---------------------------------------------------------------------------
+# TestHDDRegistry
+# ---------------------------------------------------------------------------
+
+
+def _make_experiment_file(exp_dir, expr_id, hyp_id):
+    """Create an experiment file with frontmatter."""
+    content = f'''---
+id: {expr_id}
+title: "Test Experiment"
+type: experiment
+status: draft
+hypothesis: {hyp_id}
+created: 2026-01-01
+priority: medium
+tags: []
+---
+
+# {expr_id}: Test Experiment
+'''
+    path = exp_dir / f"{expr_id}-Test-Experiment.md"
+    path.write_text(content)
+    return path
+
+
+def _make_measure_file(measure_dir, measure_id, unit="percent", category="accuracy"):
+    """Create a measure file with frontmatter."""
+    content = f'''---
+id: {measure_id}
+title: "Test Measure"
+type: measure
+status: draft
+unit: {unit}
+category: {category}
+created: 2026-01-01
+priority: medium
+tags: []
+---
+
+# {measure_id}: Test Measure
+'''
+    path = measure_dir / f"{measure_id}-Test-Measure.md"
+    path.write_text(content)
+    return path
+
+
+class TestHDDRegistry:
+    """Tests for 'yurtle-kanban hdd registry'."""
+
+    def test_registry_generates_file(self, runner, temp_repo, hdd_config):
+        """Registry command should generate REGISTRY.md."""
+        result = runner.invoke(
+            main,
+            ["hdd", "registry"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        assert "Registry written" in result.output
+
+        registry = temp_repo / "research" / "REGISTRY.md"
+        assert registry.exists()
+        content = registry.read_text()
+        assert "# HDD Research Registry" in content
+
+    def test_registry_includes_papers(self, runner, temp_repo, hdd_config):
+        """Registry should list papers with hypothesis links."""
+        _make_paper_file(temp_repo / "research" / "papers", "130")
+        _make_hypothesis_file(
+            temp_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+
+        result = runner.invoke(
+            main,
+            ["hdd", "registry"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+
+        registry = temp_repo / "research" / "REGISTRY.md"
+        content = registry.read_text()
+        assert "PAPER-130" in content
+        assert "H130.1" in content
+
+    def test_registry_includes_experiments(self, runner, temp_repo, hdd_config):
+        """Registry should list experiments with hypothesis links."""
+        _make_hypothesis_file(
+            temp_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+        _make_experiment_file(
+            temp_repo / "research" / "experiments", "EXPR-130", "H130.1",
+        )
+
+        result = runner.invoke(
+            main,
+            ["hdd", "registry"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+
+        registry = temp_repo / "research" / "REGISTRY.md"
+        content = registry.read_text()
+        assert "EXPR-130" in content
+
+    def test_registry_shows_orphaned(self, runner, temp_repo, hdd_config):
+        """Registry should list orphaned items (hypothesis without paper)."""
+        # Create hypothesis without a paper file
+        hyp_dir = temp_repo / "research" / "hypotheses"
+        (hyp_dir / "H999.1-Orphan.md").write_text(
+            "---\nid: H999.1\ntitle: \"Orphan\"\ntype: hypothesis\n"
+            "status: draft\ncreated: 2026-01-01\ntags: []\n---\n# Orphan\n"
+        )
+
+        result = runner.invoke(
+            main,
+            ["hdd", "registry"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+
+        registry = temp_repo / "research" / "REGISTRY.md"
+        content = registry.read_text()
+        assert "Orphaned" in content
+        assert "H999.1" in content
+
+    def test_registry_custom_output(self, runner, temp_repo, hdd_config):
+        """Registry should write to custom output path."""
+        output = str(temp_repo / "custom_registry.md")
+        result = runner.invoke(
+            main,
+            ["hdd", "registry", "--output", output],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert Path(output).exists()
+
+    def test_registry_empty(self, runner, temp_repo, hdd_config):
+        """Registry with no items should still generate valid markdown."""
+        result = runner.invoke(
+            main,
+            ["hdd", "registry"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "0 items indexed" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestHDDValidate
+# ---------------------------------------------------------------------------
+
+
+class TestHDDValidate:
+    """Tests for 'yurtle-kanban hdd validate'."""
+
+    def test_validate_clean(self, runner, temp_repo, hdd_config):
+        """Validate with well-linked items should exit 0."""
+        _make_paper_file(temp_repo / "research" / "papers", "130")
+        _make_hypothesis_file(
+            temp_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+        _make_experiment_file(
+            temp_repo / "research" / "experiments", "EXPR-130", "H130.1",
+        )
+
+        result = runner.invoke(
+            main,
+            ["hdd", "validate"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "Validation Report" in result.output
+
+    def test_validate_missing_paper(self, runner, temp_repo, hdd_config):
+        """Hypothesis referencing non-existent paper should be an error (exit 1)."""
+        # H130.1 references PAPER-130 but the paper doesn't exist
+        _make_hypothesis_file(
+            temp_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+
+        result = runner.invoke(
+            main,
+            ["hdd", "validate"],
+        )
+        assert result.exit_code == 1  # errors always cause exit 1
+        assert "not found" in result.output or "Error" in result.output
+
+    def test_validate_missing_hypothesis(self, runner, temp_repo, hdd_config):
+        """Experiment without hypothesis link should generate a warning."""
+        exp_dir = temp_repo / "research" / "experiments"
+        (exp_dir / "EXPR-999-No-Hyp.md").write_text(
+            "---\nid: EXPR-999\ntitle: \"No Hyp\"\ntype: experiment\n"
+            "status: draft\ncreated: 2026-01-01\ntags: []\n---\n# No Hyp\n"
+        )
+
+        result = runner.invoke(
+            main,
+            ["hdd", "validate"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "Warning" in result.output or "warning" in result.output.lower()
+
+    def test_validate_strict_fails_on_warnings(self, runner, temp_repo, hdd_config):
+        """--strict should exit 1 when warnings exist."""
+        exp_dir = temp_repo / "research" / "experiments"
+        (exp_dir / "EXPR-999-No-Hyp.md").write_text(
+            "---\nid: EXPR-999\ntitle: \"No Hyp\"\ntype: experiment\n"
+            "status: draft\ncreated: 2026-01-01\ntags: []\n---\n# No Hyp\n"
+        )
+
+        result = runner.invoke(
+            main,
+            ["hdd", "validate", "--strict"],
+        )
+        assert result.exit_code != 0
+
+    def test_validate_json_output(self, runner, temp_repo, hdd_config):
+        """--json should output valid JSON report."""
+        import json
+
+        _make_paper_file(temp_repo / "research" / "papers", "130")
+        _make_hypothesis_file(
+            temp_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+
+        result = runner.invoke(
+            main,
+            ["hdd", "validate", "--json"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "errors" in data
+        assert "warnings" in data
+        assert "summary" in data
+
+
+# ---------------------------------------------------------------------------
+# TestHDDCrossReferences (Service)
+# ---------------------------------------------------------------------------
+
+
+class TestHDDCrossReferences:
+    """Tests for KanbanService.get_hdd_cross_references()."""
+
+    def test_empty_repo(self, temp_repo, hdd_config):
+        """Empty repo should return empty cross-references."""
+        service = KanbanService(hdd_config, temp_repo)
+        xrefs = service.get_hdd_cross_references()
+        assert xrefs["papers"] == []
+        assert xrefs["hypotheses"] == []
+        assert xrefs["orphaned"] == []
+
+    def test_paper_hypothesis_link(self, temp_repo, hdd_config):
+        """Paper should list its hypotheses in cross-references."""
+        _make_paper_file(temp_repo / "research" / "papers", "130")
+        _make_hypothesis_file(
+            temp_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+        _make_hypothesis_file(
+            temp_repo / "research" / "hypotheses", "H130.2", "130",
+        )
+
+        service = KanbanService(hdd_config, temp_repo)
+        xrefs = service.get_hdd_cross_references()
+
+        papers = xrefs["papers"]
+        assert len(papers) == 1
+        assert set(papers[0]["hypotheses"]) == {"H130.1", "H130.2"}
+
+    def test_hypothesis_experiment_link(self, temp_repo, hdd_config):
+        """Hypothesis should list its experiments."""
+        _make_hypothesis_file(
+            temp_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+        _make_experiment_file(
+            temp_repo / "research" / "experiments", "EXPR-130", "H130.1",
+        )
+
+        service = KanbanService(hdd_config, temp_repo)
+        xrefs = service.get_hdd_cross_references()
+
+        hyps = xrefs["hypotheses"]
+        assert len(hyps) == 1
+        assert "EXPR-130" in hyps[0]["experiments"]
+
+    def test_orphaned_hypothesis_detected(self, temp_repo, hdd_config):
+        """Hypothesis without paper field should appear in orphaned."""
+        hyp_dir = temp_repo / "research" / "hypotheses"
+        (hyp_dir / "H999.1-Orphan.md").write_text(
+            "---\nid: H999.1\ntitle: \"Orphan\"\ntype: hypothesis\n"
+            "status: draft\ncreated: 2026-01-01\ntags: []\n---\n# Orphan\n"
+        )
+
+        service = KanbanService(hdd_config, temp_repo)
+        xrefs = service.get_hdd_cross_references()
+
+        orphaned_ids = [o["id"] for o in xrefs["orphaned"]]
+        assert "H999.1" in orphaned_ids
+
+    def test_orphaned_experiment_detected(self, temp_repo, hdd_config):
+        """Experiment without hypothesis field should appear in orphaned."""
+        exp_dir = temp_repo / "research" / "experiments"
+        (exp_dir / "EXPR-999-No-Hyp.md").write_text(
+            "---\nid: EXPR-999\ntitle: \"No Hyp\"\ntype: experiment\n"
+            "status: draft\ncreated: 2026-01-01\ntags: []\n---\n# No Hyp\n"
+        )
+
+        service = KanbanService(hdd_config, temp_repo)
+        xrefs = service.get_hdd_cross_references()
+
+        orphaned_ids = [o["id"] for o in xrefs["orphaned"]]
+        assert "EXPR-999" in orphaned_ids
+
+
+# ---------------------------------------------------------------------------
+# TestHDDValidation (Service)
+# ---------------------------------------------------------------------------
+
+
+class TestHDDValidation:
+    """Tests for KanbanService.validate_hdd_links()."""
+
+    def test_clean_validation(self, temp_repo, hdd_config):
+        """Well-linked items should produce 0 errors."""
+        _make_paper_file(temp_repo / "research" / "papers", "130")
+        _make_hypothesis_file(
+            temp_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+        _make_experiment_file(
+            temp_repo / "research" / "experiments", "EXPR-130", "H130.1",
+        )
+
+        service = KanbanService(hdd_config, temp_repo)
+        report = service.validate_hdd_links()
+        assert report["summary"]["errors"] == 0
+
+    def test_broken_paper_reference(self, temp_repo, hdd_config):
+        """Hypothesis referencing non-existent paper should produce error."""
+        _make_hypothesis_file(
+            temp_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+        # No PAPER-130 file
+
+        service = KanbanService(hdd_config, temp_repo)
+        report = service.validate_hdd_links()
+        error_ids = [e["id"] for e in report["errors"]]
+        assert "H130.1" in error_ids
+
+    def test_missing_hypothesis_link_warning(self, temp_repo, hdd_config):
+        """Experiment without hypothesis should produce warning."""
+        exp_dir = temp_repo / "research" / "experiments"
+        (exp_dir / "EXPR-999-No-Hyp.md").write_text(
+            "---\nid: EXPR-999\ntitle: \"No Hyp\"\ntype: experiment\n"
+            "status: draft\ncreated: 2026-01-01\ntags: []\n---\n# No Hyp\n"
+        )
+
+        service = KanbanService(hdd_config, temp_repo)
+        report = service.validate_hdd_links()
+        warning_ids = [w["id"] for w in report["warnings"]]
+        assert "EXPR-999" in warning_ids
+
+    def test_unused_measure_warning(self, temp_repo, hdd_config):
+        """Unreferenced measure should produce warning."""
+        _make_measure_file(temp_repo / "research" / "measures", "M-042")
+
+        service = KanbanService(hdd_config, temp_repo)
+        report = service.validate_hdd_links()
+        warning_ids = [w["id"] for w in report["warnings"]]
+        assert "M-042" in warning_ids

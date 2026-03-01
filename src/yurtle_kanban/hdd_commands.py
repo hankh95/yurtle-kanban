@@ -109,6 +109,222 @@ def hdd_backfill(dry_run):
     console.print("  ".join(summary_parts))
 
 
+@hdd.command("registry")
+@click.option("--output", "output_path", default=None, help="Output file path (default: research/REGISTRY.md)")
+@click.option("--push", is_flag=True, help="Commit and push the registry file")
+def hdd_registry(output_path: str | None, push: bool):
+    """Auto-generate a research registry from all HDD items.
+
+    Scans papers, hypotheses, experiments, measures, ideas, and literature,
+    then writes a cross-referenced REGISTRY.md file.
+
+    Examples:
+        yurtle-kanban hdd registry
+        yurtle-kanban hdd registry --output research/REGISTRY.md --push
+    """
+    import subprocess
+
+    service = _get_service()
+    xrefs = service.get_hdd_cross_references()
+
+    lines = [
+        "# HDD Research Registry",
+        "*Auto-generated — do not edit manually*",
+        "",
+    ]
+
+    # Papers section
+    papers = xrefs["papers"]
+    lines.append(f"## Papers ({len(papers)} total)")
+    if papers:
+        lines.append("")
+        lines.append("| ID | Title | Status | Hypotheses |")
+        lines.append("|----|-------|--------|------------|")
+        for p in papers:
+            hyps = ", ".join(p["hypotheses"]) or "—"
+            lines.append(f"| {p['id']} | {p['title']} | {p['status']} | {hyps} |")
+    else:
+        lines.append("No papers found.")
+    lines.append("")
+
+    # Hypotheses section
+    hypotheses = xrefs["hypotheses"]
+    lines.append(f"## Hypotheses ({len(hypotheses)} total)")
+    if hypotheses:
+        lines.append("")
+        lines.append("| ID | Paper | Statement | Target | Status | Experiments |")
+        lines.append("|----|-------|-----------|--------|--------|-------------|")
+        for h in hypotheses:
+            exps = ", ".join(h["experiments"]) or "—"
+            target = h.get("target", "") or "—"
+            lines.append(
+                f"| {h['id']} | {h['paper']} | {h['title']} | {target} | {h['status']} | {exps} |"
+            )
+    else:
+        lines.append("No hypotheses found.")
+    lines.append("")
+
+    # Experiments section
+    experiments = xrefs["experiments"]
+    lines.append(f"## Experiments ({len(experiments)} total)")
+    if experiments:
+        lines.append("")
+        lines.append("| ID | Hypothesis | Status | Runs | Last Outcome |")
+        lines.append("|----|------------|--------|------|--------------|")
+        for e in experiments:
+            lines.append(
+                f"| {e['id']} | {e['hypothesis']} | {e['status']} | {e['runs']} | {e['last_outcome'] or '—'} |"
+            )
+    else:
+        lines.append("No experiments found.")
+    lines.append("")
+
+    # Measures section
+    measures = xrefs["measures"]
+    lines.append(f"## Measures ({len(measures)} total)")
+    if measures:
+        lines.append("")
+        lines.append("| ID | Name | Unit | Category |")
+        lines.append("|----|------|------|----------|")
+        for m in measures:
+            lines.append(f"| {m['id']} | {m['title']} | {m['unit']} | {m['category']} |")
+    else:
+        lines.append("No measures found.")
+    lines.append("")
+
+    # Orphaned section
+    orphaned = xrefs["orphaned"]
+    if orphaned:
+        lines.append(f"## Orphaned Items ({len(orphaned)})")
+        lines.append("")
+        for o in orphaned:
+            lines.append(f"- {o['id']}: {o['reason']}")
+        lines.append("")
+
+    # Write registry file
+    from pathlib import Path
+
+    if output_path:
+        out = Path(output_path)
+    else:
+        out = service.repo_root / "research" / "REGISTRY.md"
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines))
+
+    console.print(f"[green]Registry written to {out}[/green]")
+
+    total = (
+        len(papers) + len(hypotheses) + len(experiments)
+        + len(measures) + len(xrefs["ideas"]) + len(xrefs["literature"])
+    )
+    console.print(f"  {total} items indexed, {len(orphaned)} orphaned")
+
+    if push:
+        try:
+            subprocess.run(
+                ["git", "add", str(out)],
+                cwd=str(service.repo_root),
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-m", "hdd: update research registry"],
+                cwd=str(service.repo_root),
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "push"],
+                cwd=str(service.repo_root),
+                capture_output=True,
+                check=True,
+            )
+            console.print("  [dim]Committed and pushed[/dim]")
+        except subprocess.CalledProcessError as e:
+            console.print(f"  [yellow]Warning: git push failed: {e}[/yellow]")
+
+
+@hdd.command("validate")
+@click.option("--strict", is_flag=True, help="Treat warnings as errors (exit 1)")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def hdd_validate(strict: bool, as_json: bool):
+    """Validate bidirectional links between HDD research items.
+
+    Checks that hypotheses reference papers, experiments reference hypotheses,
+    and all cross-references point to existing items.
+
+    Examples:
+        yurtle-kanban hdd validate
+        yurtle-kanban hdd validate --strict
+        yurtle-kanban hdd validate --json
+    """
+    import json as json_mod
+    import sys
+
+    service = _get_service()
+    report = service.validate_hdd_links()
+
+    if as_json:
+        click.echo(json_mod.dumps(report, indent=2, default=str))
+        if report["errors"] or (strict and report["warnings"]):
+            sys.exit(1)
+        return
+
+    console.print("[bold]HDD Validation Report[/bold]")
+    console.print("=" * 40)
+    console.print()
+
+    s = report["summary"]
+
+    # Papers
+    paper_ok = s["papers"] > 0
+    mark = "[green]OK[/green]" if paper_ok else "[dim]—[/dim]"
+    console.print(f"  {mark} {s['papers']} papers")
+
+    # Hypotheses
+    hyp_warns = [w for w in report["warnings"] if "hypothesis" in w.get("issue", "")]
+    hyp_errs = [e for e in report["errors"] if e["id"].startswith("H")]
+    if not hyp_warns and not hyp_errs:
+        console.print(f"  [green]OK[/green] {s['hypotheses']} hypotheses — all linked to papers")
+    else:
+        console.print(f"  [yellow]!![/yellow] {s['hypotheses']} hypotheses")
+        for w in hyp_warns:
+            console.print(f"    [yellow]Warning:[/yellow] {w['id']}: {w['issue']}")
+        for e in hyp_errs:
+            console.print(f"    [red]Error:[/red] {e['id']}: {e['issue']}")
+
+    # Experiments
+    exp_warns = [w for w in report["warnings"] if "experiment" in w.get("issue", "")]
+    exp_errs = [e for e in report["errors"] if e["id"].startswith("EXPR")]
+    if not exp_warns and not exp_errs:
+        console.print(f"  [green]OK[/green] {s['experiments']} experiments — all linked to hypotheses")
+    else:
+        console.print(f"  [yellow]!![/yellow] {s['experiments']} experiments")
+        for w in exp_warns:
+            console.print(f"    [yellow]Warning:[/yellow] {w['id']}: {w['issue']}")
+        for e in exp_errs:
+            console.print(f"    [red]Error:[/red] {e['id']}: {e['issue']}")
+
+    # Measures
+    measure_warns = [w for w in report["warnings"] if "measure" in w.get("issue", "")]
+    if not measure_warns:
+        console.print(f"  [green]OK[/green] {s['measures']} measures — all referenced")
+    else:
+        referenced = s["measures"] - len(measure_warns)
+        console.print(f"  [yellow]!![/yellow] {s['measures']} measures — {referenced} referenced, {len(measure_warns)} unused")
+        for w in measure_warns:
+            console.print(f"    [yellow]Warning:[/yellow] {w['id']}: {w['issue']}")
+
+    console.print()
+    console.print(
+        f"  Summary: {s['errors']} errors, {s['warnings']} warnings"
+    )
+
+    if report["errors"] or (strict and report["warnings"]):
+        sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # idea
 # ---------------------------------------------------------------------------
@@ -528,6 +744,139 @@ def experiment_create(
         console.print(f"[green]Created {item.id}: {title}[/green]")
         console.print(f"  File: {item.file_path}")
         _update_parent(service, hyp_id, "experiment", item.id, push=False)
+
+
+@experiment.command("run")
+@click.argument("expr_id")
+@click.option("--being", required=True, help="Being name/version (e.g., santiago-toddler-v12.4)")
+@click.option("--params", "params_str", default=None, help="Comma-separated key=value pairs (e.g., 'kbdd_rounds=3,wikidata=true')")
+@click.option("--run-by", default=None, help="Who started the run (default: git user.name)")
+@click.option("--push", is_flag=True, help="Atomic: commit and push the config.yaml")
+def experiment_run(expr_id: str, being: str, params_str: str | None, run_by: str | None, push: bool):
+    """Create a new experiment run with a timestamped folder.
+
+    Creates research/runs/EXPR-ID/TIMESTAMP/config.yaml with run metadata.
+    Scripts and training can write metrics.json to the returned folder.
+
+    Examples:
+        yurtle-kanban experiment run EXPR-130 --being santiago-toddler-v12.4
+        yurtle-kanban experiment run EXPR-130 --being v12.4 --params "kbdd_rounds=3,wikidata=true"
+    """
+    service = _get_service()
+
+    # Normalize ID
+    if not expr_id.startswith("EXPR-"):
+        expr_id = f"EXPR-{expr_id}"
+
+    # Parse params
+    params: dict[str, str] | None = None
+    if params_str:
+        params = {}
+        for pair in params_str.split(","):
+            pair = pair.strip()
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                params[k.strip()] = v.strip()
+
+    run_path = service.create_experiment_run(
+        expr_id=expr_id,
+        being=being,
+        params=params,
+        run_by=run_by,
+    )
+
+    console.print(f"[green]Created run for {expr_id}[/green]")
+    console.print(f"  Path: {run_path}")
+
+    if push:
+        import subprocess
+
+        try:
+            config_path = run_path / "config.yaml"
+            subprocess.run(
+                ["git", "add", str(config_path)],
+                cwd=str(service.repo_root),
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-m", f"experiment run: {expr_id} ({run_path.name})"],
+                cwd=str(service.repo_root),
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "push"],
+                cwd=str(service.repo_root),
+                capture_output=True,
+                check=True,
+            )
+            console.print("  [dim]Committed and pushed[/dim]")
+        except subprocess.CalledProcessError as e:
+            console.print(f"  [yellow]Warning: git push failed: {e}[/yellow]")
+
+
+@experiment.command("status")
+@click.argument("expr_id")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON for scripting")
+def experiment_status(expr_id: str, as_json: bool):
+    """Show all runs for an experiment.
+
+    Displays a table of runs with being, status, and outcome.
+
+    Examples:
+        yurtle-kanban experiment status EXPR-130
+        yurtle-kanban experiment status EXPR-130 --json
+    """
+    import json as json_mod
+
+    service = _get_service()
+
+    # Normalize ID
+    if not expr_id.startswith("EXPR-"):
+        expr_id = f"EXPR-{expr_id}"
+
+    runs = service.get_experiment_runs(expr_id)
+
+    if as_json:
+        # Serialize Path objects to strings
+        for r in runs:
+            r["run_path"] = str(r["run_path"])
+        click.echo(json_mod.dumps(runs, indent=2, default=str))
+        return
+
+    # Look up experiment title
+    item = service.get_item(expr_id)
+    title = item.title if item else expr_id
+
+    if not runs:
+        console.print(f"[dim]{expr_id}: {title}[/dim]")
+        console.print("  No runs found.")
+        return
+
+    from rich.table import Table
+
+    table = Table(title=f"{expr_id}: {title}")
+    table.add_column("Run", width=22)
+    table.add_column("Being", width=28)
+    table.add_column("Status", width=12)
+    table.add_column("Outcome")
+
+    for run in runs:
+        outcome = run.get("outcome", run.get("summary", ""))
+        status_style = {
+            "running": "yellow",
+            "complete": "green",
+            "failed": "red",
+        }.get(run["status"], "dim")
+        table.add_row(
+            run["timestamp"][:19],
+            run["being"],
+            f"[{status_style}]{run['status']}[/{status_style}]",
+            outcome or "",
+        )
+
+    console.print(table)
 
 
 # ---------------------------------------------------------------------------
