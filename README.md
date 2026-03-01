@@ -103,8 +103,10 @@ yurtle-kanban export --format json
 | `literature` | HDD: Create literature reviews |
 | `paper` | HDD: Create research papers |
 | `hypothesis` | HDD: Create testable hypotheses |
-| `experiment` | HDD: Create experiments |
+| `experiment` | HDD: `create`, `run` (timestamped runs), `status` (run history) |
 | `measure` | HDD: Create metrics/measures |
+| `hdd` | HDD: `backfill` (turtle blocks), `registry` (cross-ref index), `validate` (link checking) |
+| `rank` | Set priority rank and value summary on items |
 
 ### Preventing Duplicate IDs (Multi-Agent Safe)
 
@@ -235,6 +237,18 @@ yurtle-kanban measure create "Reasoning Accuracy" --unit percent --category accu
 
 # View research board
 yurtle-kanban board research
+
+# Run experiments (timestamped folders with config.yaml)
+yurtle-kanban experiment run EXPR-130 --being santiago-toddler-v12.4
+yurtle-kanban experiment run EXPR-130 --being v12.4 --params "kbdd_rounds=3,wikidata=true"
+yurtle-kanban experiment status EXPR-130        # Rich table of all runs
+yurtle-kanban experiment status EXPR-130 --json  # JSON for scripting
+
+# Registry & validation
+yurtle-kanban hdd registry               # Generate cross-referenced REGISTRY.md
+yurtle-kanban hdd validate               # Check bidirectional links (papers ↔ hypotheses ↔ experiments)
+yurtle-kanban hdd validate --strict      # Warnings = errors (for CI)
+yurtle-kanban hdd validate --json        # JSON output
 ```
 
 Each HDD item gets a fenced ` ```turtle ` knowledge block with RDF triples expressing
@@ -529,17 +543,28 @@ jobs:
 
 ## Changelog
 
-### v1.13.0 (2026-02-28)
+### v1.13.0 (2026-02-28 → 2026-03-01)
 
-**Graph-native backfill and robustness improvements.**
+**Experiment run tracking, HDD registry & validation, priority ranking, board-aware move.**
 
 #### Added
+- **`experiment run` command** — Create timestamped run folders under `research/runs/EXPR-ID/` with `config.yaml` containing being, params, status. Supports `--push` for atomic commit (#40)
+- **`experiment status` command** — Show all runs for an experiment in a Rich table or `--json` output. Reads `config.yaml` + optional `metrics.json` per run (#40)
+- **`hdd registry` command** — Generate a cross-referenced `REGISTRY.md` with tables for papers, hypotheses, experiments, measures, ideas, literature, and orphaned items (#40)
+- **`hdd validate` command** — Check bidirectional links (paper↔hypothesis↔experiment), detect broken references, unused measures, orphaned items. `--strict` treats warnings as errors. `--json` for CI (#40)
 - **`hdd backfill` command** — Scan all HDD files, build expected RDF triples from frontmatter, diff against existing graph, and insert only missing triples as a fenced turtle block. Supports `--dry-run` for preview. Idempotent at the triple level (#33)
 - **Partial block consolidation** — When backfilling a file that already has a turtle block, missing triples are merged into the existing block instead of appending a second one (#34)
+- **`priority_rank` field** — Explicit priority rank (lower = higher priority) on work items. `rank` command to set rank + value summary (#39)
+- **`roadmap --ranked` output** — Roadmap view sorts by priority rank when available (#39)
+- **Board-aware `move` command** — Resolves correct theme (nautical vs HDD) per item type, applies per-board WIP limits, supports HDD column aliases (CHORE-079)
+- **Highest-ID-first sorting** — `list` and `board` commands now sort items by descending numeric ID by default (#38)
 
 #### Fixed
 - **Paper field normalization** — `_normalize_paper_num()` uses regex to handle `130`, `Paper130`, `paper130`, `PAPER130` correctly. Replaces fragile `str.replace("Paper", "")` (#34)
 - **`__init__.py` version sync** — Now matches `pyproject.toml` (was stuck at 1.11.0 since v1.12.0 release)
+- **File routing in v2 mode** — `BoardConfig.scan_paths` properly parsed and aggregated in `_load_v2`. Irregular plural map handles `hypothesis→hypotheses` (#35)
+- **HDD column-to-status mappings** — Research board columns correctly map to HDD statuses (CHORE-079)
+- **Ruff lint** — All lint errors resolved across `src/` (CHORE-079)
 
 ### v1.12.0 (2026-02-28)
 
