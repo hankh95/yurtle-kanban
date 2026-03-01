@@ -279,13 +279,17 @@ def render_roadmap(
     items: list[WorkItem],
     console: Console | None = None,
     by_type: bool = False,
+    ranked: bool = False,
 ) -> None:
     """Render a prioritized roadmap view."""
     if console is None:
         console = Console()
 
     console.print()
-    console.print("[bold]Roadmap[/bold]")
+    if ranked:
+        console.print("[bold]Priority Queue[/bold] (Captain's rank order)")
+    else:
+        console.print("[bold]Roadmap[/bold]")
     console.print()
 
     if not items:
@@ -302,22 +306,27 @@ def render_roadmap(
         for type_name, group_items in groups.items():
             icon = TYPE_ICONS.get(type_name, "•")
             console.print(f"\n[bold]{icon} {type_name.title()}s[/bold]")
-            _render_roadmap_table(group_items, console)
+            _render_roadmap_table(group_items, console, ranked=ranked)
     else:
-        _render_roadmap_table(items, console)
+        _render_roadmap_table(items, console, ranked=ranked)
 
     console.print()
 
 
-def _render_roadmap_table(items: list[WorkItem], console: Console) -> None:
+def _render_roadmap_table(items: list[WorkItem], console: Console, ranked: bool = False) -> None:
     """Render a roadmap table for a group of items."""
     table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+
+    if ranked:
+        table.add_column("Rank", style="bold yellow", width=4)
     table.add_column("#", style="dim", width=3)
     table.add_column("ID", style="cyan")
     table.add_column("Title")
     table.add_column("Priority")
     table.add_column("Status")
     table.add_column("Assignee", style="dim")
+    if ranked:
+        table.add_column("Value Summary", style="dim italic", max_width=35)
 
     for i, item in enumerate(items, 1):
         priority_color = PRIORITY_COLORS.get(item.priority or "medium", "white")
@@ -332,14 +341,25 @@ def _render_roadmap_table(items: list[WorkItem], console: Console) -> None:
             assignee = ", ".join(str(a) for a in assignee if a)
         assignee = assignee or "-"
 
-        table.add_row(
+        row = []
+        if ranked:
+            rank_str = str(item.priority_rank) if item.priority_rank is not None else "-"
+            row.append(rank_str)
+        row.extend([
             str(i),
             item.id,
             title,
             f"[{priority_color}]{item.priority or 'medium'}[/{priority_color}]",
             f"[{status_color}]{item.status.value}[/{status_color}]",
             assignee,
-        )
+        ])
+        if ranked:
+            summary = item.value_summary or ""
+            if len(summary) > 35:
+                summary = summary[:32] + "..."
+            row.append(summary)
+
+        table.add_row(*row)
 
     console.print(table)
 

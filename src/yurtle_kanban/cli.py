@@ -11,7 +11,8 @@ Usage:
     yurtle-kanban show ID
     yurtle-kanban board
     yurtle-kanban stats
-    yurtle-kanban roadmap [--by-type] [--type TYPE] [--export md]
+    yurtle-kanban rank ID RANK [--summary TEXT]
+    yurtle-kanban roadmap [--by-type] [--type TYPE] [--ranked] [--export md]
     yurtle-kanban history [--week] [--month] [--since DATE] [--by-assignee]
     yurtle-kanban next [--assignee ASSIGNEE]
     yurtle-kanban export --format FORMAT [--output FILE]
@@ -683,25 +684,32 @@ def stats():
 @main.command()
 @click.option("--by-type", is_flag=True, help="Group by item type")
 @click.option("--type", "-t", "item_type", help="Filter to a single item type")
+@click.option("--ranked", is_flag=True, help="Sort by priority_rank (Captain's order)")
 @click.option("--export", "-e", "export_fmt", type=click.Choice(["md"]), help="Export as markdown")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
-def roadmap(by_type: bool, item_type: str | None, export_fmt: str | None, as_json: bool):
+def roadmap(by_type: bool, item_type: str | None, ranked: bool, export_fmt: str | None, as_json: bool):
     """Show a prioritized roadmap of all work items.
 
     Displays all non-done items sorted by priority (critical first).
+    Use --ranked to sort by Captain's priority_rank instead.
     Use --by-type to group by item type.
 
     Examples:
         yurtle-kanban roadmap
+        yurtle-kanban roadmap --ranked
         yurtle-kanban roadmap --by-type
         yurtle-kanban roadmap --type expedition
         yurtle-kanban roadmap --export md
     """
     service = get_service()
 
-    # Get all non-done items
-    items = service.get_items()
-    items = [i for i in items if i.status != WorkItemStatus.DONE]
+    if ranked:
+        # Use ranked ordering: priority_rank first, then priority_score
+        items = service.get_ranked_items()
+    else:
+        # Get all non-done items (sorted by priority_score)
+        items = service.get_items()
+        items = [i for i in items if i.status != WorkItemStatus.DONE]
 
     # Optional type filter
     if item_type:
@@ -712,7 +720,6 @@ def roadmap(by_type: bool, item_type: str | None, export_fmt: str | None, as_jso
             console.print(f"[red]Unknown type: {item_type}[/red]")
             sys.exit(1)
 
-    # Items are already sorted by priority from get_items()
     if as_json:
         data = [item.to_dict() for item in items]
         click.echo(json.dumps(data, indent=2))
@@ -721,12 +728,48 @@ def roadmap(by_type: bool, item_type: str | None, export_fmt: str | None, as_jso
         for i, item in enumerate(items, 1):
             priority = item.priority or "medium"
             assignee = item.assignee or "unassigned"
+            rank_str = f" [rank:{item.priority_rank}]" if item.priority_rank is not None else ""
             lines.append(
-                f"{i}. **{item.id}**: {item.title} [{priority}] ({item.status.value}) @{assignee}"
+                f"{i}. **{item.id}**: {item.title} [{priority}]{rank_str} ({item.status.value}) @{assignee}"
             )
         click.echo("\n".join(lines))
     else:
-        render_roadmap(items, console, by_type=by_type)
+        render_roadmap(items, console, by_type=by_type, ranked=ranked)
+
+
+@main.command()
+@click.argument("item_id")
+@click.argument("rank_number", type=int)
+@click.option("--summary", "-s", help="Brief value statement for this item")
+@click.option("--no-commit", is_flag=True, help="Don't create git commit")
+def rank(item_id: str, rank_number: int, summary: str | None, no_commit: bool):
+    """Set the priority rank for a work item.
+
+    Lower rank = higher priority (1 = top of the queue).
+    The Captain uses this to set the work order.
+
+    Examples:
+        yurtle-kanban rank EXP-1019 1
+        yurtle-kanban rank EXP-1022 2 --summary "Unblocks Paper 127"
+        yurtle-kanban rank CHORE-078 3
+    """
+    service = get_service()
+    try:
+        item = service.rank_item(
+            item_id.upper(),
+            rank_number,
+            value_summary=summary,
+            commit=not no_commit,
+        )
+        console.print(f"[green]Ranked {item.id} as #{rank_number}[/green]")
+        if summary:
+            console.print(f"  Value: {summary}")
+        if item.priority:
+            console.print(f"  Priority: {item.priority}")
+        console.print(f"  Status: {item.status.value}")
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        sys.exit(1)
 
 
 @main.command()

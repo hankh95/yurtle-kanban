@@ -129,6 +129,8 @@ class WorkItem:
     resolution: str | None = None  # completed, superseded, wont_do, duplicate, obsolete, merged
     superseded_by: list[str] = field(default_factory=list)  # list of item IDs
     graph: Graph | None = None  # RDF graph from frontmatter + fenced blocks
+    priority_rank: int | None = None  # Explicit priority rank (lower = higher priority)
+    value_summary: str | None = None  # Brief value statement for prioritization
 
     def __post_init__(self):
         if self.updated is None:
@@ -185,6 +187,8 @@ class WorkItem:
             "description": self.description,
             "resolution": self.resolution,
             "superseded_by": self.superseded_by,
+            "priority_rank": self.priority_rank,
+            "value_summary": self.value_summary,
             "triple_count": len(self.graph) if self.graph else 0,
         }
 
@@ -263,6 +267,11 @@ class WorkItem:
 
         if self.related:
             lines.append(f"related: [{', '.join(self.related)}]")
+
+        if self.priority_rank is not None:
+            lines.append(f"priority_rank: {self.priority_rank}")
+        if self.value_summary:
+            lines.append(f'value_summary: "{self.value_summary}"')
 
         if self.resolution:
             lines.append(f"resolution: {self.resolution}")
