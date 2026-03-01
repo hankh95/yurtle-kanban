@@ -586,7 +586,7 @@ class KanbanService:
         if assignee:
             items = [i for i in items if i.assignee == assignee]
 
-        return sorted(items, key=lambda i: (-i.priority_score, i.id))
+        return sorted(items, key=lambda i: (-i.priority_score, -i.numeric_id))
 
     def _get_type_directory(self, item_type: WorkItemType, board_name: str | None = None) -> Path:
         """Get the directory for placing a file of this item type.

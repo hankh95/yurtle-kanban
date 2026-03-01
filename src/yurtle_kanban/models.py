@@ -156,6 +156,17 @@ class WorkItem:
         }
         return priority_map.get(self.priority or "medium", 50)
 
+    @property
+    def numeric_id(self) -> int:
+        """Extract trailing number from ID for numeric sorting.
+
+        EXP-1016 → 1016, H130.1 → 130, M-007 → 7, CHORE-080 → 80.
+        Falls back to 0 if no number found.
+        """
+        import re
+        match = re.search(r"(\d+)", self.id or "")
+        return int(match.group(1)) if match else 0
+
     def get_knowledge_triples(self, predicate: URIRef) -> list[str]:
         """Get all object values for a predicate from the knowledge graph.
 
