@@ -2,17 +2,16 @@
 Tests for multi-board configuration support.
 """
 
-import pytest
 from pathlib import Path
-import tempfile
-import shutil
+
+import pytest
 
 from yurtle_kanban.config import (
-    KanbanConfig,
-    BoardConfig,
-    PathConfig,
-    CONFIG_VERSION_SINGLE,
     CONFIG_VERSION_MULTI,
+    CONFIG_VERSION_SINGLE,
+    BoardConfig,
+    KanbanConfig,
+    PathConfig,
 )
 from yurtle_kanban.service import KanbanService
 
@@ -452,7 +451,6 @@ default_board: development
         from yurtle_kanban.models import WorkItemType
 
         service = multiboard_hdd_setup["service"]
-        tmp_path = multiboard_hdd_setup["tmp_path"]
 
         item = service.create_item(
             item_type=WorkItemType.HYPOTHESIS,
@@ -784,3 +782,219 @@ status: backlog
             "EXP-001", WorkItemStatus.READY, commit=False, validate_workflow=False
         )
         assert item.status == WorkItemStatus.READY
+
+
+class TestHDDStateRoundTrip:
+    """Issue #41: HDD state names should be preserved on move write-back.
+
+    When moving a research item like H130.1 to 'active', the file should have
+    `status: active` (HDD native name), not `status: in_progress` (canonical name).
+    Also, HDD transitions (draft→active) should work without --force.
+    """
+
+    @pytest.fixture
+    def hdd_state_setup(self, tmp_path):
+        """Create a multi-board environment with HDD research board."""
+        config_path = tmp_path / ".kanban" / "config.yaml"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text("""
+version: "2.0"
+boards:
+  - name: development
+    preset: nautical
+    path: kanban-work/
+  - name: research
+    preset: hdd
+    path: research/
+default_board: development
+""")
+
+        (tmp_path / "kanban-work" / "expeditions").mkdir(parents=True)
+        (tmp_path / "research" / "hypotheses").mkdir(parents=True)
+        (tmp_path / "research" / "experiments").mkdir(parents=True)
+
+        # Create a hypothesis with HDD native status 'draft'
+        hyp_file = tmp_path / "research" / "hypotheses" / "H130.1.md"
+        hyp_file.write_text("""---
+id: H130.1
+title: "Test Hypothesis"
+type: hypothesis
+status: draft
+---
+# Test Hypothesis
+""")
+
+        # Create an experiment with HDD native status 'active'
+        expr_file = tmp_path / "research" / "experiments" / "EXPR-130.md"
+        expr_file.write_text("""---
+id: EXPR-130
+title: "Test Experiment"
+type: experiment
+status: active
+---
+# Test Experiment
+""")
+
+        # Create a dev item for comparison
+        dev_file = tmp_path / "kanban-work" / "expeditions" / "EXP-999.md"
+        dev_file.write_text("""---
+id: EXP-999
+title: "Test Expedition"
+type: expedition
+status: backlog
+---
+# Test Expedition
+""")
+
+        config = KanbanConfig.load(config_path)
+        service = KanbanService(config, tmp_path)
+        return {
+            "tmp_path": tmp_path,
+            "config": config,
+            "service": service,
+            "hyp_file": hyp_file,
+            "expr_file": expr_file,
+            "dev_file": dev_file,
+        }
+
+    def test_move_hdd_item_writes_native_status(self, hdd_state_setup):
+        """Moving H130.1 to 'active' should write 'status: active', not 'in_progress'."""
+        from yurtle_kanban.models import WorkItemStatus
+
+        service = hdd_state_setup["service"]
+        hyp_file = hdd_state_setup["hyp_file"]
+
+        # Move hypothesis from draft (backlog) to active (in_progress)
+        item = service.move_item(
+            "H130.1", WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=False
+        )
+        assert item.status == WorkItemStatus.IN_PROGRESS
+
+        # Read the file and verify it has HDD native name
+        content = hyp_file.read_text()
+        assert "status: active" in content
+        assert "status: in_progress" not in content
+
+    def test_move_hdd_item_to_complete_writes_complete(self, hdd_state_setup):
+        """Moving EXPR-130 to 'complete' should write 'status: complete', not 'done'."""
+        from yurtle_kanban.models import WorkItemStatus
+
+        service = hdd_state_setup["service"]
+        expr_file = hdd_state_setup["expr_file"]
+
+        # Move experiment from active (in_progress) to complete (done)
+        item = service.move_item(
+            "EXPR-130", WorkItemStatus.DONE, commit=False, validate_workflow=False
+        )
+        assert item.status == WorkItemStatus.DONE
+
+        # Read the file and verify it has HDD native name
+        content = expr_file.read_text()
+        assert "status: complete" in content
+        assert "status: done" not in content
+
+    def test_move_dev_item_writes_canonical_status(self, hdd_state_setup):
+        """Dev items should still use canonical names (in_progress, not active)."""
+        from yurtle_kanban.models import WorkItemStatus
+
+        service = hdd_state_setup["service"]
+        dev_file = hdd_state_setup["dev_file"]
+
+        # Move dev item to in_progress
+        item = service.move_item(
+            "EXP-999", WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=False
+        )
+        assert item.status == WorkItemStatus.IN_PROGRESS
+
+        # Read the file and verify it has canonical name (nautical doesn't define reverse mapping)
+        content = dev_file.read_text()
+        assert "status: in_progress" in content
+
+    def test_hdd_draft_to_active_transition_valid(self, hdd_state_setup):
+        """HDD draft→active transition should be valid without --force."""
+        from yurtle_kanban.models import WorkItemStatus
+
+        service = hdd_state_setup["service"]
+
+        # This should NOT raise an error with validate_workflow=True
+        item = service.move_item(
+            "H130.1", WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=True
+        )
+        assert item.status == WorkItemStatus.IN_PROGRESS
+
+    def test_hdd_active_to_complete_transition_valid(self, hdd_state_setup):
+        """HDD active→complete transition should be valid without --force."""
+        from yurtle_kanban.models import WorkItemStatus
+
+        service = hdd_state_setup["service"]
+
+        # Move experiment from active to complete
+        item = service.move_item(
+            "EXPR-130", WorkItemStatus.DONE, commit=False, validate_workflow=True
+        )
+        assert item.status == WorkItemStatus.DONE
+
+    def test_hdd_invalid_transition_rejected(self, hdd_state_setup):
+        """HDD draft→complete transition should be rejected (not a valid HDD transition)."""
+        from yurtle_kanban.models import WorkItemStatus
+
+        service = hdd_state_setup["service"]
+
+        # draft→complete is not allowed in HDD (must go draft→active→complete)
+        with pytest.raises(ValueError, match="Invalid transition"):
+            service.move_item(
+                "H130.1", WorkItemStatus.DONE, commit=False, validate_workflow=True
+            )
+
+    def test_reverse_status_mapping_hdd(self, hdd_state_setup):
+        """Test _get_reverse_status_mapping for HDD board."""
+        service = hdd_state_setup["service"]
+
+        board = service.config.get_board("research")
+        mapping = service._get_reverse_status_mapping(board)
+
+        assert mapping.get("backlog") == "draft"
+        assert mapping.get("in_progress") == "active"
+        assert mapping.get("done") == "complete"
+        assert mapping.get("blocked") == "abandoned"
+
+    def test_reverse_status_mapping_no_board(self, hdd_state_setup):
+        """Test _get_reverse_status_mapping returns empty for non-HDD board."""
+        service = hdd_state_setup["service"]
+
+        # Nautical preset has no status_mappings → empty reverse mapping
+        board = service.config.get_board("development")
+        mapping = service._get_reverse_status_mapping(board)
+
+        assert mapping == {}
+
+    def test_move_hdd_item_to_abandoned_writes_abandoned(self, hdd_state_setup):
+        """Moving an HDD item to 'abandoned' should write native name."""
+        from yurtle_kanban.models import WorkItemStatus
+
+        service = hdd_state_setup["service"]
+        hyp_file = hdd_state_setup["hyp_file"]
+
+        # draft→abandoned is valid in HDD transitions
+        item = service.move_item(
+            "H130.1", WorkItemStatus.BLOCKED, commit=False,
+            validate_workflow=True,
+        )
+        assert item.status == WorkItemStatus.BLOCKED
+
+        content = hyp_file.read_text()
+        assert "status: abandoned" in content
+        assert "status: blocked" not in content
+
+    def test_board_transitions_hdd(self, hdd_state_setup):
+        """Test _get_board_transitions returns HDD-specific transitions."""
+        service = hdd_state_setup["service"]
+
+        board = service.config.get_board("research")
+        transitions = service._get_board_transitions(board)
+
+        assert transitions is not None
+        assert "draft" in transitions
+        assert "active" in transitions["draft"]
+        assert "abandoned" in transitions["draft"]
+        assert "complete" in transitions["active"]
