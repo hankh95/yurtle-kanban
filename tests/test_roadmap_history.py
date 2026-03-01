@@ -196,8 +196,10 @@ class TestHistoryCommand:
         """--since should filter by date."""
         monkeypatch.chdir(populated_repo)
         runner = CliRunner()
-        # Items were created on 2026-02-15, so --since 2026-03-01 should show none
-        result = runner.invoke(main, ["history", "--since", "2026-03-01"])
+        # Use a far-future date so items never pass the filter
+        # (items have updated=datetime.now() from __post_init__)
+        future = (date.today() + timedelta(days=30)).isoformat()
+        result = runner.invoke(main, ["history", "--since", future])
 
         assert result.exit_code == 0
         assert "No completed items" in result.output
