@@ -2887,3 +2887,312 @@ class KanbanService:
             "orphaned": xrefs["orphaned"],
             "summary": summary,
         }
+
+    # ------------------------------------------------------------------
+    # HDD Cross-Board Dependency Engine (Phase 5)
+    # ------------------------------------------------------------------
+
+    def _resolve_implements(
+        self, fm: dict[str, Any],
+    ) -> tuple[list[str], dict[str, str], bool]:
+        """Parse implements field and resolve expedition statuses.
+
+        Returns (implements_list, implements_status, all_dev_done).
+        """
+        implements_raw = fm.get("implements", [])
+        if isinstance(implements_raw, str):
+            implements_list = [implements_raw]
+        elif isinstance(implements_raw, list):
+            implements_list = [str(x) for x in implements_raw]
+        else:
+            implements_list = []
+
+        implements_status: dict[str, str] = {}
+        all_dev_done = True
+        for exp_id in implements_list:
+            dev_item = self.get_item(exp_id)
+            if dev_item:
+                implements_status[exp_id] = dev_item.status.value
+                if dev_item.status.value != "done":
+                    all_dev_done = False
+            else:
+                implements_status[exp_id] = "not_found"
+                all_dev_done = False
+
+        return implements_list, implements_status, all_dev_done
+
+    def _compute_readiness(
+        self,
+        implements_list: list[str],
+        all_dev_done: bool,
+        runs: list[dict[str, Any]],
+    ) -> tuple[str, bool, bool, bool]:
+        """Determine experiment readiness from dev status and training runs.
+
+        Returns (readiness, has_completed_run, has_running_run, has_metrics).
+        """
+        has_completed_run = any(
+            r.get("status") == "complete" for r in runs
+        )
+        has_running_run = any(
+            r.get("status") == "running" for r in runs
+        )
+        has_metrics = any(
+            r.get("outcome") or r.get("summary") for r in runs
+        )
+
+        if not implements_list:
+            readiness = "no_dev_dependency"
+        elif not all_dev_done:
+            readiness = "blocked_by_dev"
+        elif has_completed_run and has_metrics:
+            readiness = "needs_analysis"
+        elif has_completed_run:
+            readiness = "training_complete"
+        elif has_running_run:
+            readiness = "training_in_progress"
+        else:
+            readiness = "ready_for_training"
+
+        return readiness, has_completed_run, has_running_run, has_metrics
+
+    def build_cross_board_graph(self) -> dict[str, Any]:
+        """Build a cross-board dependency graph spanning research and dev boards.
+
+        Traverses: Paper → Hypothesis → Experiment → Expedition (dev board)
+                                                    → Training Runs
+
+        Returns a dict with:
+          - experiments: list of experiment nodes with full dependency chains
+          - dev_blockers: expedition IDs that block research experiments
+          - ready_for_training: experiments where all dev work is done
+          - training_in_progress: experiments with running training
+          - needs_analysis: experiments with completed training
+        """
+        xrefs = self.get_hdd_cross_references()
+
+        # Build paper → hypothesis lookup (paper_id → [hyp_ids])
+        paper_hyps: dict[str, list[str]] = {}
+        hyp_paper: dict[str, str] = {}
+        for h in xrefs["hypotheses"]:
+            paper = h.get("paper", "")
+            if paper:
+                paper_hyps.setdefault(paper, []).append(h["id"])
+                hyp_paper[h["id"]] = paper
+
+        # Build hypothesis → experiment lookup (hyp_id → [expr_ids])
+        hyp_exps: dict[str, list[str]] = {}
+        for e in xrefs["experiments"]:
+            hyp = e.get("hypothesis", "")
+            if hyp:
+                hyp_exps.setdefault(hyp, []).append(e["id"])
+
+        # For each experiment, resolve implements → dev board expedition statuses
+        experiment_nodes: list[dict[str, Any]] = []
+        dev_blockers: list[str] = []
+        ready_for_training: list[str] = []
+        training_in_progress: list[str] = []
+        needs_analysis: list[str] = []
+
+        for exp_info in xrefs["experiments"]:
+            expr_id = exp_info["id"]
+            item = self.get_item(expr_id)
+            if not item:
+                continue
+
+            fm = self._get_hdd_frontmatter(item)
+            impl_list, impl_status, all_done = self._resolve_implements(fm)
+
+            runs = self.get_experiment_runs(expr_id)
+            readiness, _, _, _ = self._compute_readiness(
+                impl_list, all_done, runs,
+            )
+
+            # Calculate downstream impact
+            hyp_id = exp_info.get("hypothesis", "")
+            paper_id = hyp_paper.get(hyp_id, "")
+            blocking_chain: list[str] = []
+            if hyp_id:
+                blocking_chain.append(hyp_id)
+            if paper_id:
+                blocking_chain.append(paper_id)
+
+            # Count other experiments sharing the same hypothesis (exclude self)
+            sibling_experiments = hyp_exps.get(hyp_id, [])
+            other_experiments = max(0, len(sibling_experiments) - 1)
+            # Count other hypotheses sharing the same paper (exclude self)
+            sibling_hypotheses = paper_hyps.get(paper_id, [])
+            other_hypotheses = max(0, len(sibling_hypotheses) - 1)
+
+            downstream_impact = other_experiments + other_hypotheses
+
+            node: dict[str, Any] = {
+                "experiment_id": expr_id,
+                "title": exp_info.get("title", ""),
+                "status": exp_info.get("status", ""),
+                "hypothesis_id": hyp_id,
+                "paper_id": paper_id,
+                "implements": impl_list,
+                "implements_status": impl_status,
+                "readiness": readiness,
+                "runs": len(runs),
+                "last_run_status": runs[0].get("status", "") if runs else "",
+                "last_outcome": runs[0].get("outcome", "") if runs else "",
+                "downstream_impact": downstream_impact,
+                "blocking_chain": blocking_chain,
+                "compute_requirement": fm.get("compute_requirement", ""),
+                "assignee": item.assignee or "",
+            }
+            experiment_nodes.append(node)
+
+            # Categorize
+            if readiness == "blocked_by_dev":
+                for eid, status in impl_status.items():
+                    if status != "done":
+                        dev_blockers.append(eid)
+            elif readiness == "ready_for_training":
+                ready_for_training.append(expr_id)
+            elif readiness == "training_in_progress":
+                training_in_progress.append(expr_id)
+            elif readiness == "needs_analysis":
+                needs_analysis.append(expr_id)
+
+        # Sort experiments by downstream impact (high first), then readiness priority
+        readiness_order = {
+            "ready_for_training": 0,
+            "training_in_progress": 1,
+            "blocked_by_dev": 2,
+            "needs_analysis": 3,
+            "training_complete": 4,
+            "no_dev_dependency": 5,
+        }
+        experiment_nodes.sort(
+            key=lambda n: (
+                readiness_order.get(n["readiness"], 9),
+                -n["downstream_impact"],
+            )
+        )
+
+        return {
+            "experiments": experiment_nodes,
+            "dev_blockers": sorted(set(dev_blockers)),
+            "ready_for_training": ready_for_training,
+            "training_in_progress": training_in_progress,
+            "needs_analysis": needs_analysis,
+            "summary": {
+                "total_experiments": len(experiment_nodes),
+                "ready_for_training": len(ready_for_training),
+                "blocked_by_dev": sum(
+                    1 for n in experiment_nodes
+                    if n["readiness"] == "blocked_by_dev"
+                ),
+                "training_in_progress": len(training_in_progress),
+                "needs_analysis": len(needs_analysis),
+                "dev_blockers": len(set(dev_blockers)),
+            },
+        }
+
+    def get_experiment_readiness(self, expr_id: str) -> dict[str, Any]:
+        """Check a single experiment's readiness for training.
+
+        Returns a dict with: readiness, implements, implements_status,
+        runs, blocking_chain, compute_requirement.
+        """
+        item = self.get_item(expr_id)
+        if not item:
+            return {"error": f"{expr_id} not found", "readiness": "unknown"}
+
+        fm = self._get_hdd_frontmatter(item)
+        impl_list, impl_status, all_done = self._resolve_implements(fm)
+
+        runs = self.get_experiment_runs(expr_id)
+        readiness, has_completed_run, _, has_metrics = (
+            self._compute_readiness(impl_list, all_done, runs)
+        )
+
+        # Build blocking chain from frontmatter
+        hyp_id = fm.get("hypothesis", "")
+        paper_id = fm.get("paper", "")
+        blocking_chain: list[str] = []
+        if hyp_id:
+            blocking_chain.append(str(hyp_id))
+        if paper_id:
+            blocking_chain.append(str(paper_id))
+
+        return {
+            "experiment_id": expr_id,
+            "title": item.title,
+            "readiness": readiness,
+            "implements": impl_list,
+            "implements_status": impl_status,
+            "runs": len(runs),
+            "has_completed_run": has_completed_run,
+            "has_metrics": has_metrics,
+            "blocking_chain": blocking_chain,
+            "compute_requirement": fm.get("compute_requirement", ""),
+            "assignee": item.assignee or "",
+        }
+
+    def get_critical_path(
+        self,
+        agent: str | None = None,
+        ready_only: bool = False,
+        dev_blockers_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Get the prioritized critical path for research experiments.
+
+        Traverses Paper → Hypothesis → Experiment → Expedition (dev board)
+        to determine what's ready for training, what's blocked, and what
+        has the highest downstream impact.
+
+        Args:
+            agent: Filter to experiments relevant to this agent/assignee.
+            ready_only: Only return experiments ready for training.
+            dev_blockers_only: Only return dev board items blocking research.
+
+        Returns:
+            List of critical path items sorted by readiness then downstream impact.
+        """
+        graph = self.build_cross_board_graph()
+        experiments = graph["experiments"]
+
+        # Filter by agent if specified
+        if agent:
+            agent_lower = agent.lower()
+            experiments = [
+                e for e in experiments
+                if e.get("assignee", "").lower() == agent_lower
+            ]
+
+        # Filter by readiness
+        if ready_only:
+            experiments = [
+                e for e in experiments
+                if e["readiness"] == "ready_for_training"
+            ]
+
+        if dev_blockers_only:
+            # Return the dev board items that block research
+            blocker_ids = graph["dev_blockers"]
+            blockers: list[dict[str, Any]] = []
+            for bid in blocker_ids:
+                dev_item = self.get_item(bid)
+                if dev_item:
+                    # Count how many experiments this blocker unblocks
+                    unblocks = [
+                        e["experiment_id"] for e in graph["experiments"]
+                        if bid in e.get("implements", [])
+                        and e["readiness"] == "blocked_by_dev"
+                    ]
+                    blockers.append({
+                        "expedition_id": bid,
+                        "title": dev_item.title,
+                        "status": dev_item.status.value,
+                        "assignee": dev_item.assignee or "",
+                        "unblocks_experiments": unblocks,
+                        "impact": len(unblocks),
+                    })
+            blockers.sort(key=lambda b: -b["impact"])
+            return blockers
+
+        return experiments

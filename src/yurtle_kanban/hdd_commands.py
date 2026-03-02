@@ -335,6 +335,174 @@ def hdd_validate(strict: bool, as_json: bool):
         sys.exit(1)
 
 
+@hdd.command("critical-path")
+@click.option("--agent", default=None, help="Filter to items relevant to this agent")
+@click.option(
+    "--ready-for-training", "ready_only", is_flag=True,
+    help="Only show experiments ready for DGX training",
+)
+@click.option(
+    "--dev-blockers", "dev_blockers_only", is_flag=True,
+    help="Only show dev work that blocks research experiments",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def hdd_critical_path(
+    agent: str | None,
+    ready_only: bool,
+    dev_blockers_only: bool,
+    as_json: bool,
+):
+    """Show the cross-board critical path for research experiments.
+
+    Traverses Paper → Hypothesis → Experiment → Expedition (dev board)
+    to determine what's ready for training, blocked by dev work, or
+    needs analysis. Prioritizes by downstream research impact.
+
+    This is the Bosun's primary tool for research queue scheduling.
+
+    Examples:
+        yurtle-kanban hdd critical-path
+        yurtle-kanban hdd critical-path --agent DGX
+        yurtle-kanban hdd critical-path --ready-for-training
+        yurtle-kanban hdd critical-path --dev-blockers
+        yurtle-kanban hdd critical-path --json
+    """
+    import json as json_mod
+
+    service = _get_service()
+    results = service.get_critical_path(
+        agent=agent,
+        ready_only=ready_only,
+        dev_blockers_only=dev_blockers_only,
+    )
+
+    if as_json:
+        click.echo(json_mod.dumps(results, indent=2, default=str))
+        return
+
+    if dev_blockers_only:
+        _render_dev_blockers(results)
+        return
+
+    _render_critical_path(results, agent=agent, ready_only=ready_only)
+
+
+def _render_dev_blockers(blockers: list[dict]) -> None:
+    """Render dev board items that block research experiments."""
+    if not blockers:
+        console.print("[green]No dev blockers found — all research is unblocked.[/green]")
+        return
+
+    console.print("[bold]Dev Work Blocking Research[/bold]")
+    console.print("=" * 50)
+    console.print()
+
+    for i, b in enumerate(blockers, 1):
+        impact_color = "red" if b["impact"] >= 3 else "yellow" if b["impact"] >= 2 else "white"
+        console.print(
+            f"  {i}. [bold]{b['expedition_id']}[/bold] — {b['title']}"
+        )
+        console.print(f"     Status: {b['status']}  Assignee: {b['assignee'] or 'unassigned'}")
+        console.print(
+            f"     [{impact_color}]Unblocks {b['impact']} experiment(s):[/{impact_color}] "
+            + ", ".join(b["unblocks_experiments"])
+        )
+        console.print()
+
+
+def _render_critical_path(
+    experiments: list[dict],
+    agent: str | None = None,
+    ready_only: bool = False,
+) -> None:
+    """Render the critical path with Rich formatting."""
+    if not experiments:
+        if ready_only:
+            console.print("[dim]No experiments ready for training.[/dim]")
+        elif agent:
+            console.print(f"[dim]No experiments found for agent '{agent}'.[/dim]")
+        else:
+            console.print("[dim]No experiments with dev dependencies found.[/dim]")
+        return
+
+    title = "HDD Critical Path"
+    if agent:
+        title += f" (Agent: {agent})"
+    console.print(f"[bold]{title}[/bold]")
+    console.print("=" * 50)
+
+    # Group by readiness
+    groups: dict[str, list[dict]] = {}
+    for exp in experiments:
+        groups.setdefault(exp["readiness"], []).append(exp)
+
+    group_labels = {
+        "ready_for_training": ("Ready for Training", "green", "DGX GPU slot available"),
+        "training_in_progress": ("Training In Progress", "blue", "Currently running"),
+        "blocked_by_dev": ("Blocked by Dev Work", "yellow", "Needs expedition first"),
+        "needs_analysis": ("Needs Analysis", "cyan", "Training done, results pending"),
+        "training_complete": ("Training Complete", "green", "Awaiting hypothesis validation"),
+        "no_dev_dependency": ("No Dev Dependency", "dim", "Direct research items"),
+    }
+
+    for readiness_key, (label, color, desc) in group_labels.items():
+        items = groups.get(readiness_key, [])
+        if not items:
+            continue
+
+        console.print()
+        console.print(f"[bold {color}]{label}[/bold {color}] [dim]({desc})[/dim]")
+        console.print()
+
+        for exp in items:
+            # Experiment header
+            eid = exp['experiment_id']
+            console.print(
+                f"  [{color}]●[/{color}] [bold]{eid}[/bold]"
+                f" — {exp['title']}"
+            )
+
+            # Chain: hypothesis → paper
+            chain_parts = []
+            if exp.get("hypothesis_id"):
+                chain_parts.append(exp["hypothesis_id"])
+            if exp.get("paper_id"):
+                chain_parts.append(exp["paper_id"])
+            if chain_parts:
+                console.print(f"    Chain: {' → '.join(chain_parts)}")
+
+            # Implements (dev board links)
+            if exp.get("implements"):
+                impl_strs = []
+                for eid in exp["implements"]:
+                    status = exp["implements_status"].get(eid, "?")
+                    mark = "[green]✓[/green]" if status == "done" else "[red]✗[/red]"
+                    impl_strs.append(f"{eid} {mark} ({status})")
+                console.print(f"    Implements: {', '.join(impl_strs)}")
+
+            # Runs info
+            if exp.get("runs"):
+                run_info = f"{exp['runs']} run(s)"
+                if exp.get("last_outcome"):
+                    run_info += f", last: {exp['last_outcome']}"
+                elif exp.get("last_run_status"):
+                    run_info += f", last: {exp['last_run_status']}"
+                console.print(f"    Runs: {run_info}")
+
+            # Impact
+            if exp.get("downstream_impact", 0) > 2:
+                console.print(
+                    f"    [bold yellow]HIGH IMPACT:[/bold yellow] "
+                    f"downstream impact score: {exp['downstream_impact']}"
+                )
+
+            # Assignee
+            if exp.get("assignee"):
+                console.print(f"    Assignee: {exp['assignee']}")
+
+            console.print()
+
+
 # ---------------------------------------------------------------------------
 # idea
 # ---------------------------------------------------------------------------
