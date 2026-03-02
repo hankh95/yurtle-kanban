@@ -265,6 +265,8 @@ class KanbanService:
             if isinstance(superseded_by, str):
                 superseded_by = [s.strip() for s in superseded_by.split(",")]
 
+            compute_requirement = frontmatter.get("compute_requirement")
+
             # Parse RDF graph from frontmatter + fenced blocks
             graph = self._parse_graph(content)
 
@@ -286,6 +288,7 @@ class KanbanService:
                 graph=graph,
                 priority_rank=priority_rank,
                 value_summary=value_summary,
+                compute_requirement=compute_requirement,
             )
 
         except Exception as e:

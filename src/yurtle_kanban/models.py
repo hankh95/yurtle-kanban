@@ -131,6 +131,7 @@ class WorkItem:
     graph: Graph | None = None  # RDF graph from frontmatter + fenced blocks
     priority_rank: int | None = None  # Explicit priority rank (lower = higher priority)
     value_summary: str | None = None  # Brief value statement for prioritization
+    compute_requirement: str | None = None  # e.g. dgx-training, gpu, cpu-safe
 
     def __post_init__(self):
         if self.updated is None:
@@ -200,6 +201,7 @@ class WorkItem:
             "superseded_by": self.superseded_by,
             "priority_rank": self.priority_rank,
             "value_summary": self.value_summary,
+            "compute_requirement": self.compute_requirement,
             "triple_count": len(self.graph) if self.graph else 0,
         }
 
@@ -241,6 +243,9 @@ class WorkItem:
         if self.superseded_by:
             refs_str = ", ".join(f"<{ref}>" for ref in self.superseded_by)
             lines.append(f"   kb:supersededBy {refs_str} ;")
+
+        if self.compute_requirement:
+            lines.append(f'   kb:computeRequirement "{self.compute_requirement}" ;')
 
         # Remove trailing semicolon from last line and add period
         lines[-1] = lines[-1].rstrip(" ;") + " ."
@@ -284,6 +289,9 @@ class WorkItem:
         if self.value_summary:
             escaped = self.value_summary.replace('"', '\\"')
             lines.append(f'value_summary: "{escaped}"')
+
+        if self.compute_requirement:
+            lines.append(f"compute_requirement: {self.compute_requirement}")
 
         if self.resolution:
             lines.append(f"resolution: {self.resolution}")
