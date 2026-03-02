@@ -352,6 +352,133 @@ status: in_progress
         assert "EXP-001" not in research_ids
 
 
+class TestGetItemsBoardFilter:
+    """Tests for get_items(board=...) filtering."""
+
+    @pytest.fixture
+    def multi_board_setup(self, tmp_path):
+        """Create a multi-board test environment with items on both boards."""
+        config_path = tmp_path / ".kanban" / "config.yaml"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text("""
+version: "2.0"
+boards:
+  - name: development
+    preset: nautical
+    path: kanban-work/
+  - name: research
+    preset: software
+    path: research/
+default_board: development
+""")
+
+        (tmp_path / "kanban-work" / "expeditions").mkdir(parents=True)
+        (tmp_path / "research" / "experiments").mkdir(parents=True)
+
+        (tmp_path / "kanban-work" / "expeditions" / "EXP-001-Test.md").write_text("""---
+id: EXP-001
+title: "Dev Item"
+type: expedition
+status: backlog
+---
+# Dev Item
+""")
+        (tmp_path / "kanban-work" / "expeditions" / "EXP-002-Active.md").write_text("""---
+id: EXP-002
+title: "Active Dev Item"
+type: expedition
+status: in_progress
+---
+# Active Dev Item
+""")
+        (tmp_path / "research" / "experiments" / "EXPR-101.md").write_text("""---
+id: EXPR-101
+title: "Research Experiment"
+type: feature
+status: in_progress
+---
+# Research Experiment
+""")
+        (tmp_path / "research" / "experiments" / "EXPR-102.md").write_text("""---
+id: EXPR-102
+title: "Draft Experiment"
+type: feature
+status: backlog
+---
+# Draft Experiment
+""")
+
+        config = KanbanConfig.load(config_path)
+        service = KanbanService(config, tmp_path)
+        return service
+
+    def test_get_items_no_board_returns_all(self, multi_board_setup):
+        """Without board filter, get_items returns items from all boards."""
+        items = multi_board_setup.get_items()
+        ids = {i.id for i in items}
+        assert "EXP-001" in ids
+        assert "EXP-002" in ids
+        assert "EXPR-101" in ids
+        assert "EXPR-102" in ids
+
+    def test_get_items_board_development(self, multi_board_setup):
+        """With board='development', only dev items returned."""
+        items = multi_board_setup.get_items(board="development")
+        ids = {i.id for i in items}
+        assert "EXP-001" in ids
+        assert "EXP-002" in ids
+        assert "EXPR-101" not in ids
+        assert "EXPR-102" not in ids
+
+    def test_get_items_board_research(self, multi_board_setup):
+        """With board='research', only research items returned."""
+        items = multi_board_setup.get_items(board="research")
+        ids = {i.id for i in items}
+        assert "EXPR-101" in ids
+        assert "EXPR-102" in ids
+        assert "EXP-001" not in ids
+        assert "EXP-002" not in ids
+
+    def test_get_items_board_with_status_filter(self, multi_board_setup):
+        """Board filter combines with status filter."""
+        from yurtle_kanban.models import WorkItemStatus
+        items = multi_board_setup.get_items(
+            board="research",
+            status=WorkItemStatus.IN_PROGRESS,
+        )
+        ids = {i.id for i in items}
+        assert ids == {"EXPR-101"}
+
+    def test_get_items_board_invalid_name(self, multi_board_setup):
+        """Invalid board name returns empty list."""
+        items = multi_board_setup.get_items(board="nonexistent")
+        assert items == []
+
+    def test_get_items_board_ignored_in_single_board(self, tmp_path):
+        """In single-board mode, board parameter is ignored."""
+        config_path = tmp_path / ".kanban" / "config.yaml"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text("""
+theme: software
+paths:
+  root: work/
+""")
+        (tmp_path / "work").mkdir()
+        (tmp_path / "work" / "ITEM-001.md").write_text("""---
+id: ITEM-001
+title: "Solo Item"
+type: feature
+status: backlog
+---
+# Solo
+""")
+        config = KanbanConfig.load(config_path)
+        service = KanbanService(config, tmp_path)
+        items = service.get_items(board="research")
+        assert len(items) == 1
+        assert items[0].id == "ITEM-001"
+
+
 class TestBoardForPath:
     """Tests for detecting board from path."""
 
