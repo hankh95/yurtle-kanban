@@ -2892,6 +2892,70 @@ class KanbanService:
     # HDD Cross-Board Dependency Engine (Phase 5)
     # ------------------------------------------------------------------
 
+    def _resolve_implements(
+        self, fm: dict[str, Any],
+    ) -> tuple[list[str], dict[str, str], bool]:
+        """Parse implements field and resolve expedition statuses.
+
+        Returns (implements_list, implements_status, all_dev_done).
+        """
+        implements_raw = fm.get("implements", [])
+        if isinstance(implements_raw, str):
+            implements_list = [implements_raw]
+        elif isinstance(implements_raw, list):
+            implements_list = [str(x) for x in implements_raw]
+        else:
+            implements_list = []
+
+        implements_status: dict[str, str] = {}
+        all_dev_done = True
+        for exp_id in implements_list:
+            dev_item = self.get_item(exp_id)
+            if dev_item:
+                implements_status[exp_id] = dev_item.status.value
+                if dev_item.status.value != "done":
+                    all_dev_done = False
+            else:
+                implements_status[exp_id] = "not_found"
+                all_dev_done = False
+
+        return implements_list, implements_status, all_dev_done
+
+    def _compute_readiness(
+        self,
+        implements_list: list[str],
+        all_dev_done: bool,
+        runs: list[dict[str, Any]],
+    ) -> tuple[str, bool, bool, bool]:
+        """Determine experiment readiness from dev status and training runs.
+
+        Returns (readiness, has_completed_run, has_running_run, has_metrics).
+        """
+        has_completed_run = any(
+            r.get("status") == "complete" for r in runs
+        )
+        has_running_run = any(
+            r.get("status") == "running" for r in runs
+        )
+        has_metrics = any(
+            r.get("outcome") or r.get("summary") for r in runs
+        )
+
+        if not implements_list:
+            readiness = "no_dev_dependency"
+        elif not all_dev_done:
+            readiness = "blocked_by_dev"
+        elif has_completed_run and has_metrics:
+            readiness = "needs_analysis"
+        elif has_completed_run:
+            readiness = "training_complete"
+        elif has_running_run:
+            readiness = "training_in_progress"
+        else:
+            readiness = "ready_for_training"
+
+        return readiness, has_completed_run, has_running_run, has_metrics
+
     def build_cross_board_graph(self) -> dict[str, Any]:
         """Build a cross-board dependency graph spanning research and dev boards.
 
@@ -2937,50 +3001,12 @@ class KanbanService:
                 continue
 
             fm = self._get_hdd_frontmatter(item)
-            implements_raw = fm.get("implements", [])
-            if isinstance(implements_raw, str):
-                implements_list = [implements_raw]
-            elif isinstance(implements_raw, list):
-                implements_list = [str(x) for x in implements_raw]
-            else:
-                implements_list = []
+            impl_list, impl_status, all_done = self._resolve_implements(fm)
 
-            # Look up each expedition's status on the dev board
-            implements_status: dict[str, str] = {}
-            all_dev_done = True
-            for exp_id in implements_list:
-                dev_item = self.get_item(exp_id)
-                if dev_item:
-                    implements_status[exp_id] = dev_item.status.value
-                    if dev_item.status.value != "done":
-                        all_dev_done = False
-                else:
-                    implements_status[exp_id] = "not_found"
-                    all_dev_done = False
-
-            # Check training runs
             runs = self.get_experiment_runs(expr_id)
-            has_completed_run = any(r.get("status") == "complete" for r in runs)
-            has_running_run = any(r.get("status") == "running" for r in runs)
-            has_metrics = any(r.get("outcome") or r.get("summary") for r in runs)
-
-            # Determine readiness
-            if not implements_list:
-                # No dev dependency — check experiment status directly
-                if exp_info["status"] in ("active", "in_progress"):
-                    readiness = "no_dev_dependency"
-                else:
-                    readiness = "no_dev_dependency"
-            elif not all_dev_done:
-                readiness = "blocked_by_dev"
-            elif has_completed_run and has_metrics:
-                readiness = "needs_analysis"
-            elif has_completed_run:
-                readiness = "training_complete"
-            elif has_running_run:
-                readiness = "training_in_progress"
-            else:
-                readiness = "ready_for_training"
+            readiness, _, _, _ = self._compute_readiness(
+                impl_list, all_done, runs,
+            )
 
             # Calculate downstream impact
             hyp_id = exp_info.get("hypothesis", "")
@@ -2991,15 +3017,14 @@ class KanbanService:
             if paper_id:
                 blocking_chain.append(paper_id)
 
-            # Count how many other experiments share the same hypothesis
+            # Count other experiments sharing the same hypothesis (exclude self)
             sibling_experiments = hyp_exps.get(hyp_id, [])
-            # Count how many hypotheses share the same paper
+            other_experiments = max(0, len(sibling_experiments) - 1)
+            # Count other hypotheses sharing the same paper (exclude self)
             sibling_hypotheses = paper_hyps.get(paper_id, [])
+            other_hypotheses = max(0, len(sibling_hypotheses) - 1)
 
-            downstream_impact = len(sibling_experiments) + len(sibling_hypotheses)
-
-            # Read compute_requirement from frontmatter if present
-            compute_req = fm.get("compute_requirement", "")
+            downstream_impact = other_experiments + other_hypotheses
 
             node: dict[str, Any] = {
                 "experiment_id": expr_id,
@@ -3007,22 +3032,22 @@ class KanbanService:
                 "status": exp_info.get("status", ""),
                 "hypothesis_id": hyp_id,
                 "paper_id": paper_id,
-                "implements": implements_list,
-                "implements_status": implements_status,
+                "implements": impl_list,
+                "implements_status": impl_status,
                 "readiness": readiness,
                 "runs": len(runs),
                 "last_run_status": runs[0].get("status", "") if runs else "",
                 "last_outcome": runs[0].get("outcome", "") if runs else "",
                 "downstream_impact": downstream_impact,
                 "blocking_chain": blocking_chain,
-                "compute_requirement": compute_req,
+                "compute_requirement": fm.get("compute_requirement", ""),
                 "assignee": item.assignee or "",
             }
             experiment_nodes.append(node)
 
             # Categorize
             if readiness == "blocked_by_dev":
-                for eid, status in implements_status.items():
+                for eid, status in impl_status.items():
                     if status != "done":
                         dev_blockers.append(eid)
             elif readiness == "ready_for_training":
@@ -3042,7 +3067,10 @@ class KanbanService:
             "no_dev_dependency": 5,
         }
         experiment_nodes.sort(
-            key=lambda n: (readiness_order.get(n["readiness"], 9), -n["downstream_impact"])
+            key=lambda n: (
+                readiness_order.get(n["readiness"], 9),
+                -n["downstream_impact"],
+            )
         )
 
         return {
@@ -3054,7 +3082,10 @@ class KanbanService:
             "summary": {
                 "total_experiments": len(experiment_nodes),
                 "ready_for_training": len(ready_for_training),
-                "blocked_by_dev": len([n for n in experiment_nodes if n["readiness"] == "blocked_by_dev"]),
+                "blocked_by_dev": sum(
+                    1 for n in experiment_nodes
+                    if n["readiness"] == "blocked_by_dev"
+                ),
                 "training_in_progress": len(training_in_progress),
                 "needs_analysis": len(needs_analysis),
                 "dev_blockers": len(set(dev_blockers)),
@@ -3072,45 +3103,14 @@ class KanbanService:
             return {"error": f"{expr_id} not found", "readiness": "unknown"}
 
         fm = self._get_hdd_frontmatter(item)
-        implements_raw = fm.get("implements", [])
-        if isinstance(implements_raw, str):
-            implements_list = [implements_raw]
-        elif isinstance(implements_raw, list):
-            implements_list = [str(x) for x in implements_raw]
-        else:
-            implements_list = []
-
-        implements_status: dict[str, str] = {}
-        all_dev_done = True
-        for exp_id in implements_list:
-            dev_item = self.get_item(exp_id)
-            if dev_item:
-                implements_status[exp_id] = dev_item.status.value
-                if dev_item.status.value != "done":
-                    all_dev_done = False
-            else:
-                implements_status[exp_id] = "not_found"
-                all_dev_done = False
+        impl_list, impl_status, all_done = self._resolve_implements(fm)
 
         runs = self.get_experiment_runs(expr_id)
-        has_completed_run = any(r.get("status") == "complete" for r in runs)
-        has_running_run = any(r.get("status") == "running" for r in runs)
-        has_metrics = any(r.get("outcome") or r.get("summary") for r in runs)
+        readiness, has_completed_run, _, has_metrics = (
+            self._compute_readiness(impl_list, all_done, runs)
+        )
 
-        if not implements_list:
-            readiness = "no_dev_dependency"
-        elif not all_dev_done:
-            readiness = "blocked_by_dev"
-        elif has_completed_run and has_metrics:
-            readiness = "needs_analysis"
-        elif has_completed_run:
-            readiness = "training_complete"
-        elif has_running_run:
-            readiness = "training_in_progress"
-        else:
-            readiness = "ready_for_training"
-
-        # Build blocking chain
+        # Build blocking chain from frontmatter
         hyp_id = fm.get("hypothesis", "")
         paper_id = fm.get("paper", "")
         blocking_chain: list[str] = []
@@ -3123,8 +3123,8 @@ class KanbanService:
             "experiment_id": expr_id,
             "title": item.title,
             "readiness": readiness,
-            "implements": implements_list,
-            "implements_status": implements_status,
+            "implements": impl_list,
+            "implements_status": impl_status,
             "runs": len(runs),
             "has_completed_run": has_completed_run,
             "has_metrics": has_metrics,

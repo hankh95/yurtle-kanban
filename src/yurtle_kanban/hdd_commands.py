@@ -456,7 +456,11 @@ def _render_critical_path(
 
         for exp in items:
             # Experiment header
-            console.print(f"  [{color}]●[/{color}] [bold]{exp['experiment_id']}[/bold] — {exp['title']}")
+            eid = exp['experiment_id']
+            console.print(
+                f"  [{color}]●[/{color}] [bold]{eid}[/bold]"
+                f" — {exp['title']}"
+            )
 
             # Chain: hypothesis → paper
             chain_parts = []

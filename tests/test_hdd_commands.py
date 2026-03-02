@@ -1849,8 +1849,8 @@ class TestCriticalPathService:
 
         for exp in graph["experiments"]:
             if exp["experiment_id"] in ("EXPR-130A", "EXPR-130B"):
-                # Both share H130.1 and PAPER-130, so impact ≥ 2
-                assert exp["downstream_impact"] >= 2
+                # Both share H130.1 → 1 sibling experiment (excludes self)
+                assert exp["downstream_impact"] >= 1
 
 
 class TestExperimentReadiness:
