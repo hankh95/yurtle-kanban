@@ -1546,3 +1546,538 @@ class TestHDDValidation:
         report = service.validate_hdd_links()
         warning_ids = [w["id"] for w in report["warnings"]]
         assert "M-042" in warning_ids
+
+
+# ---------------------------------------------------------------------------
+# Helpers for critical-path tests
+# ---------------------------------------------------------------------------
+
+
+def _make_expedition_file(exp_dir, exp_id, status="backlog", assignee=None):
+    """Create a dev board expedition file (EXP-XXX)."""
+    content = f'''---
+id: {exp_id}
+title: "Dev Work for {exp_id}"
+type: expedition
+status: {status}
+created: 2026-01-01
+priority: medium
+tags: []
+'''
+    if assignee:
+        content += f"assignee: {assignee}\n"
+    content += f'''---
+
+# {exp_id}: Dev Work for {exp_id}
+'''
+    path = exp_dir / f"{exp_id}-Dev-Work.md"
+    path.write_text(content)
+    return path
+
+
+def _make_experiment_with_implements(exp_dir, expr_id, hyp_id, implements, assignee=None, status="draft"):
+    """Create an experiment file with implements field linking to dev board."""
+    if isinstance(implements, list):
+        impl_yaml = "[" + ", ".join(implements) + "]"
+    else:
+        impl_yaml = implements
+    content = f'''---
+id: {expr_id}
+title: "Experiment {expr_id}"
+type: experiment
+status: {status}
+hypothesis: {hyp_id}
+implements: {impl_yaml}
+created: 2026-01-01
+priority: medium
+tags: []
+'''
+    if assignee:
+        content += f"assignee: {assignee}\n"
+    content += f'''---
+
+# {expr_id}: Experiment {expr_id}
+'''
+    path = exp_dir / f"{expr_id}-Experiment.md"
+    path.write_text(content)
+    return path
+
+
+@pytest.fixture
+def cross_board_repo(tmp_path):
+    """Create a repo with both research and dev board directories."""
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=tmp_path, capture_output=True, check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=tmp_path, capture_output=True, check=True,
+    )
+    # Research board dirs
+    (tmp_path / ".kanban").mkdir()
+    (tmp_path / "research" / "ideas").mkdir(parents=True)
+    (tmp_path / "research" / "literature").mkdir(parents=True)
+    (tmp_path / "research" / "papers").mkdir(parents=True)
+    (tmp_path / "research" / "hypotheses").mkdir(parents=True)
+    (tmp_path / "research" / "experiments").mkdir(parents=True)
+    (tmp_path / "research" / "measures").mkdir(parents=True)
+    (tmp_path / "research" / "runs").mkdir(parents=True)
+    # Dev board dir
+    (tmp_path / "kanban-work" / "expeditions").mkdir(parents=True)
+    return tmp_path
+
+
+@pytest.fixture
+def cross_board_config(cross_board_repo):
+    """Config scanning both research and dev board directories."""
+    config = KanbanConfig(
+        theme="hdd",
+        paths=PathConfig(
+            root="research/",
+            scan_paths=[
+                "research/ideas/",
+                "research/literature/",
+                "research/papers/",
+                "research/hypotheses/",
+                "research/experiments/",
+                "research/measures/",
+                "kanban-work/expeditions/",
+            ],
+        ),
+    )
+    config.save(cross_board_repo / ".kanban" / "config.yaml")
+    return config
+
+
+@pytest.fixture
+def cross_board_service(cross_board_repo, cross_board_config):
+    """KanbanService scanning both boards."""
+    return KanbanService(cross_board_config, cross_board_repo)
+
+
+@pytest.fixture
+def cross_board_runner(cross_board_repo, cross_board_config, monkeypatch):
+    """Click CLI runner for cross-board tests."""
+    from yurtle_kanban import config as config_mod
+
+    config_mod._theme_cache.clear()
+    monkeypatch.chdir(cross_board_repo)
+    return CliRunner()
+
+
+# ---------------------------------------------------------------------------
+# TestCriticalPathService
+# ---------------------------------------------------------------------------
+
+
+class TestCriticalPathService:
+    """Tests for KanbanService cross-board dependency engine."""
+
+    def test_build_cross_board_graph_basic(self, cross_board_repo, cross_board_config):
+        """Graph should link experiment → expedition via implements field."""
+        _make_paper_file(cross_board_repo / "research" / "papers", "130")
+        _make_hypothesis_file(
+            cross_board_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-130", "H130.1", "EXP-992",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-992", status="done",
+        )
+
+        service = KanbanService(cross_board_config, cross_board_repo)
+        graph = service.build_cross_board_graph()
+
+        assert graph["summary"]["total_experiments"] >= 1
+        expr_node = next(
+            e for e in graph["experiments"] if e["experiment_id"] == "EXPR-130"
+        )
+        assert expr_node["implements"] == ["EXP-992"]
+        assert expr_node["implements_status"]["EXP-992"] == "done"
+        assert expr_node["readiness"] == "ready_for_training"
+        assert "EXPR-130" in graph["ready_for_training"]
+
+    def test_blocked_by_dev(self, cross_board_repo, cross_board_config):
+        """Experiment should be blocked when expedition is not done."""
+        _make_paper_file(cross_board_repo / "research" / "papers", "127")
+        _make_hypothesis_file(
+            cross_board_repo / "research" / "hypotheses", "H127.3", "127",
+        )
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-127", "H127.3", "EXP-991",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-991", status="backlog",
+        )
+
+        service = KanbanService(cross_board_config, cross_board_repo)
+        graph = service.build_cross_board_graph()
+
+        expr_node = next(
+            e for e in graph["experiments"] if e["experiment_id"] == "EXPR-127"
+        )
+        assert expr_node["readiness"] == "blocked_by_dev"
+        assert "EXP-991" in graph["dev_blockers"]
+
+    def test_multiple_implements(self, cross_board_repo, cross_board_config):
+        """Experiment with multiple implements should be blocked if any is not done."""
+        _make_paper_file(cross_board_repo / "research" / "papers", "128")
+        _make_hypothesis_file(
+            cross_board_repo / "research" / "hypotheses", "H128.1", "128",
+        )
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-128", "H128.1", ["EXP-878", "EXP-879"],
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-878", status="done",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-879", status="in_progress",
+        )
+
+        service = KanbanService(cross_board_config, cross_board_repo)
+        graph = service.build_cross_board_graph()
+
+        expr_node = next(
+            e for e in graph["experiments"] if e["experiment_id"] == "EXPR-128"
+        )
+        assert expr_node["readiness"] == "blocked_by_dev"
+        assert expr_node["implements_status"]["EXP-878"] == "done"
+        assert expr_node["implements_status"]["EXP-879"] == "in_progress"
+
+    def test_all_implements_done_ready_for_training(self, cross_board_repo, cross_board_config):
+        """When all implements are done, experiment should be ready_for_training."""
+        _make_paper_file(cross_board_repo / "research" / "papers", "128")
+        _make_hypothesis_file(
+            cross_board_repo / "research" / "hypotheses", "H128.1", "128",
+        )
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-128", "H128.1", ["EXP-878", "EXP-879"],
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-878", status="done",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-879", status="done",
+        )
+
+        service = KanbanService(cross_board_config, cross_board_repo)
+        graph = service.build_cross_board_graph()
+
+        expr_node = next(
+            e for e in graph["experiments"] if e["experiment_id"] == "EXPR-128"
+        )
+        assert expr_node["readiness"] == "ready_for_training"
+
+    def test_training_complete_with_run(self, cross_board_repo, cross_board_config):
+        """Experiment with completed run should show training_complete."""
+        _make_paper_file(cross_board_repo / "research" / "papers", "121")
+        _make_hypothesis_file(
+            cross_board_repo / "research" / "hypotheses", "H121.1", "121",
+        )
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-121", "H121.1", "EXP-992",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-992", status="done",
+        )
+
+        # Create a completed training run
+        service = KanbanService(cross_board_config, cross_board_repo)
+        run_path = service.create_experiment_run("EXPR-121", "santiago-v12")
+        service.update_run_status(run_path, "complete")
+
+        # Re-scan
+        service = KanbanService(cross_board_config, cross_board_repo)
+        graph = service.build_cross_board_graph()
+
+        expr_node = next(
+            e for e in graph["experiments"] if e["experiment_id"] == "EXPR-121"
+        )
+        assert expr_node["readiness"] == "training_complete"
+
+    def test_no_dev_dependency(self, cross_board_repo, cross_board_config):
+        """Experiment without implements should be no_dev_dependency."""
+        _make_paper_file(cross_board_repo / "research" / "papers", "130")
+        _make_hypothesis_file(
+            cross_board_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+        _make_experiment_file(
+            cross_board_repo / "research" / "experiments", "EXPR-130", "H130.1",
+        )
+
+        service = KanbanService(cross_board_config, cross_board_repo)
+        graph = service.build_cross_board_graph()
+
+        expr_node = next(
+            e for e in graph["experiments"] if e["experiment_id"] == "EXPR-130"
+        )
+        assert expr_node["readiness"] == "no_dev_dependency"
+
+    def test_downstream_impact_scoring(self, cross_board_repo, cross_board_config):
+        """Experiments with more downstream items should score higher."""
+        _make_paper_file(cross_board_repo / "research" / "papers", "130")
+        _make_hypothesis_file(
+            cross_board_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+        # Two experiments sharing the same hypothesis → higher impact
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-130A", "H130.1", "EXP-997",
+        )
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-130B", "H130.1", "EXP-998",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-997", status="done",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-998", status="done",
+        )
+
+        service = KanbanService(cross_board_config, cross_board_repo)
+        graph = service.build_cross_board_graph()
+
+        for exp in graph["experiments"]:
+            if exp["experiment_id"] in ("EXPR-130A", "EXPR-130B"):
+                # Both share H130.1 and PAPER-130, so impact ≥ 2
+                assert exp["downstream_impact"] >= 2
+
+
+class TestExperimentReadiness:
+    """Tests for KanbanService.get_experiment_readiness()."""
+
+    def test_readiness_blocked(self, cross_board_repo, cross_board_config):
+        """Should detect blocked_by_dev when expedition not done."""
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-127", "H127.3", "EXP-991",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-991", status="backlog",
+        )
+
+        service = KanbanService(cross_board_config, cross_board_repo)
+        result = service.get_experiment_readiness("EXPR-127")
+        assert result["readiness"] == "blocked_by_dev"
+        assert result["implements_status"]["EXP-991"] == "backlog"
+
+    def test_readiness_ready(self, cross_board_repo, cross_board_config):
+        """Should detect ready_for_training when all expeditions done."""
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-121", "H121.1", "EXP-992",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-992", status="done",
+        )
+
+        service = KanbanService(cross_board_config, cross_board_repo)
+        result = service.get_experiment_readiness("EXPR-121")
+        assert result["readiness"] == "ready_for_training"
+
+    def test_readiness_not_found(self, cross_board_repo, cross_board_config):
+        """Should return error for non-existent experiment."""
+        service = KanbanService(cross_board_config, cross_board_repo)
+        result = service.get_experiment_readiness("EXPR-999")
+        assert result["readiness"] == "unknown"
+        assert "error" in result
+
+
+class TestGetCriticalPath:
+    """Tests for KanbanService.get_critical_path()."""
+
+    def test_filter_by_agent(self, cross_board_repo, cross_board_config):
+        """Should filter experiments by assignee."""
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-A", "H130.1", "EXP-997", assignee="DGX",
+        )
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-B", "H130.1", "EXP-998", assignee="Mini",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-997", status="done",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-998", status="done",
+        )
+
+        service = KanbanService(cross_board_config, cross_board_repo)
+        dgx_items = service.get_critical_path(agent="DGX")
+        assert all(e["assignee"] == "DGX" for e in dgx_items)
+        assert len(dgx_items) == 1
+
+    def test_ready_only_filter(self, cross_board_repo, cross_board_config):
+        """--ready-for-training should only return ready experiments."""
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-READY", "H130.1", "EXP-997",
+        )
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-BLOCKED", "H127.3", "EXP-991",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-997", status="done",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-991", status="backlog",
+        )
+
+        service = KanbanService(cross_board_config, cross_board_repo)
+        ready = service.get_critical_path(ready_only=True)
+        assert all(e["readiness"] == "ready_for_training" for e in ready)
+        assert any(e["experiment_id"] == "EXPR-READY" for e in ready)
+        assert not any(e["experiment_id"] == "EXPR-BLOCKED" for e in ready)
+
+    def test_dev_blockers_only(self, cross_board_repo, cross_board_config):
+        """--dev-blockers should return expedition items blocking research."""
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-127", "H127.3", "EXP-991",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-991", status="backlog",
+        )
+
+        service = KanbanService(cross_board_config, cross_board_repo)
+        blockers = service.get_critical_path(dev_blockers_only=True)
+        assert len(blockers) >= 1
+        assert blockers[0]["expedition_id"] == "EXP-991"
+        assert "EXPR-127" in blockers[0]["unblocks_experiments"]
+
+    def test_sorting_ready_before_blocked(self, cross_board_repo, cross_board_config):
+        """Ready experiments should appear before blocked ones."""
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-READY", "H130.1", "EXP-997",
+        )
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-BLOCKED", "H127.3", "EXP-991",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-997", status="done",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-991", status="backlog",
+        )
+
+        service = KanbanService(cross_board_config, cross_board_repo)
+        path = service.get_critical_path()
+        # Find positions
+        ready_idx = next(
+            i for i, e in enumerate(path) if e["experiment_id"] == "EXPR-READY"
+        )
+        blocked_idx = next(
+            i for i, e in enumerate(path) if e["experiment_id"] == "EXPR-BLOCKED"
+        )
+        assert ready_idx < blocked_idx
+
+
+# ---------------------------------------------------------------------------
+# TestCriticalPathCLI
+# ---------------------------------------------------------------------------
+
+
+class TestCriticalPathCLI:
+    """Tests for 'yurtle-kanban hdd critical-path' CLI command."""
+
+    def test_critical_path_basic(self, cross_board_runner, cross_board_repo, cross_board_config):
+        """Critical path command should run and show output."""
+        _make_paper_file(cross_board_repo / "research" / "papers", "130")
+        _make_hypothesis_file(
+            cross_board_repo / "research" / "hypotheses", "H130.1", "130",
+        )
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-130", "H130.1", "EXP-992",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-992", status="done",
+        )
+
+        result = cross_board_runner.invoke(
+            main, ["hdd", "critical-path"], catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "EXPR-130" in result.output
+        assert "Ready for Training" in result.output
+
+    def test_critical_path_json(self, cross_board_runner, cross_board_repo, cross_board_config):
+        """--json flag should output valid JSON."""
+        import json as json_mod
+
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-130", "H130.1", "EXP-992",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-992", status="done",
+        )
+
+        result = cross_board_runner.invoke(
+            main, ["hdd", "critical-path", "--json"], catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        data = json_mod.loads(result.output)
+        assert isinstance(data, list)
+
+    def test_critical_path_dev_blockers(self, cross_board_runner, cross_board_repo, cross_board_config):
+        """--dev-blockers should show blocking expeditions."""
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-127", "H127.3", "EXP-991",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-991", status="backlog",
+        )
+
+        result = cross_board_runner.invoke(
+            main, ["hdd", "critical-path", "--dev-blockers"], catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "EXP-991" in result.output
+
+    def test_critical_path_agent_filter(self, cross_board_runner, cross_board_repo, cross_board_config):
+        """--agent should filter output to that agent."""
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-A", "H130.1", "EXP-997", assignee="DGX",
+        )
+        _make_experiment_with_implements(
+            cross_board_repo / "research" / "experiments",
+            "EXPR-B", "H130.1", "EXP-998", assignee="Mini",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-997", status="done",
+        )
+        _make_expedition_file(
+            cross_board_repo / "kanban-work" / "expeditions", "EXP-998", status="done",
+        )
+
+        result = cross_board_runner.invoke(
+            main, ["hdd", "critical-path", "--agent", "DGX"], catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        assert "EXPR-A" in result.output
+        # EXPR-B (Mini) should not appear
+        assert "EXPR-B" not in result.output
+
+    def test_critical_path_empty(self, cross_board_runner, cross_board_repo, cross_board_config):
+        """Empty board should not crash."""
+        result = cross_board_runner.invoke(
+            main, ["hdd", "critical-path"], catch_exceptions=False,
+        )
+        assert result.exit_code == 0
