@@ -295,11 +295,13 @@ kanban:
 @click.option("--status", "-s", help="Filter by status (backlog, ready, in_progress, review, done)")
 @click.option("--type", "-t", "item_type", help="Filter by type (feature, bug, epic, task)")
 @click.option("--assignee", "-a", help="Filter by assignee")
+@click.option("--board", "-b", "board_name", help="Filter to a specific board (multi-board mode)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def list_items(
     status: str | None,
     item_type: str | None,
     assignee: str | None,
+    board_name: str | None,
     as_json: bool,
 ):
     """List work items."""
@@ -326,6 +328,7 @@ def list_items(
         status=status_filter,
         item_type=type_filter,
         assignee=assignee,
+        board=board_name,
     )
 
     if not items:

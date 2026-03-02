@@ -643,12 +643,27 @@ class KanbanService:
         status: WorkItemStatus | None = None,
         item_type: WorkItemType | None = None,
         assignee: str | None = None,
+        board: str | None = None,
     ) -> list[WorkItem]:
-        """Get items with optional filters."""
-        if not self._items:
-            self.scan()
+        """Get items with optional filters.
 
-        items = list(self._items.values())
+        Args:
+            status: Filter by status
+            item_type: Filter by type
+            assignee: Filter by assignee
+            board: Filter to a specific board (multi-board mode only).
+                   If None, returns items from all boards (default behavior).
+        """
+        if board and self.config.is_multi_board:
+            board_config = self.config.get_board(board)
+            if board_config:
+                items = self._scan_board(board_config)
+            else:
+                items = []
+        else:
+            if not self._items:
+                self.scan()
+            items = list(self._items.values())
 
         if status:
             items = [i for i in items if i.status == status]
