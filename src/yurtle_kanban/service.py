@@ -644,6 +644,7 @@ class KanbanService:
         item_type: WorkItemType | None = None,
         assignee: str | None = None,
         board: str | None = None,
+        priority: list[str] | None = None,
     ) -> list[WorkItem]:
         """Get items with optional filters.
 
@@ -653,6 +654,7 @@ class KanbanService:
             assignee: Filter by assignee
             board: Filter to a specific board (multi-board mode only).
                    If None, returns items from all boards (default behavior).
+            priority: Filter by priority level(s) (e.g. ["critical", "high"]).
         """
         if board and self.config.is_multi_board:
             board_config = self.config.get_board(board)
@@ -671,6 +673,8 @@ class KanbanService:
             items = [i for i in items if i.item_type == item_type]
         if assignee:
             items = [i for i in items if i.assignee == assignee]
+        if priority:
+            items = [i for i in items if (i.priority or "medium") in priority]
 
         return sorted(items, key=lambda i: (-i.priority_score, -i.numeric_id))
 
