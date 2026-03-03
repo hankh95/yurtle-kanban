@@ -255,6 +255,9 @@ Each HDD item gets a fenced ` ```turtle ` knowledge block with RDF triples expre
 research relationships (hypothesis→paper, experiment→hypothesis, etc.). Creating a child
 item automatically updates the parent's knowledge block with an inverse reference.
 
+**Learn more:** See the [HDD Methodology Guide](docs/hdd-methodology.md) for the full
+philosophy, worked examples, and integration patterns including agent fleet automation.
+
 **Custom:** Define your own in `themes/my-theme.yaml`
 
 ## MCP Server for AI Agents
