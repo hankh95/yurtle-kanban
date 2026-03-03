@@ -485,6 +485,8 @@ yurtle-kanban hdd validate --strict
 
 ## Further Reading
 
+- **[HDD Blog Post](https://nusy.dev/blog/hypothesis-driven-development)** — The "why" of HDD in 1,200 words
+- **[Full HDD Methodology Reference](https://github.com/hankh95/nusy-product-team/blob/main/docs/hdd-methodology.md)** — Detailed lifecycle, experiment design, statistical rigor, worked examples
 - **[yurtle-kanban CLI Reference](../README.md)** — Full command documentation
 - **[Theme Reference](THEMES.md)** — Software, nautical, and HDD theme details
 - **[Yurtle specification](https://github.com/hankh95/yurtle)** — The Turtle-in-Markdown format
