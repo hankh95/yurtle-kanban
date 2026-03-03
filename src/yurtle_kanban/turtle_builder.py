@@ -10,6 +10,10 @@ Principle: frontmatter describes the thing itself.
 
 from __future__ import annotations
 
+import re
+
+_SAFE_LOCAL_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+
 
 def _escape_turtle_string(value: str) -> str:
     """Escape special characters for Turtle string literals.
@@ -17,6 +21,22 @@ def _escape_turtle_string(value: str) -> str:
     Backslashes and double-quotes must be escaped inside "..." strings.
     """
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _validate_turtle_local_name(value: str) -> str:
+    """Validate a value used in a Turtle prefixed name (prefix:localName).
+
+    Rejects characters that could break TTL syntax or inject triples.
+    Only allows alphanumeric, dot, hyphen, and underscore.
+
+    Raises ValueError if the value contains disallowed characters.
+    """
+    if not _SAFE_LOCAL_NAME.match(value):
+        raise ValueError(
+            f"Invalid Turtle local name: {value!r} — "
+            "only [A-Za-z0-9._-] are allowed"
+        )
+    return value
 
 
 # Standard HDD prefixes used across research items.
@@ -83,7 +103,7 @@ class TurtleBlockBuilder:
         prefixes: set[str],
     ) -> list[str]:
         prefixes.update(["idea", "rdfs"])
-        item_id = variables.get("id", "IDEA-R-XXX")
+        item_id = _validate_turtle_local_name(variables.get("id", "IDEA-R-XXX"))
         title = _escape_turtle_string(variables.get("title", ""))
         return [
             f"<#{item_id}> a idea:Idea ;",
@@ -96,7 +116,7 @@ class TurtleBlockBuilder:
         prefixes: set[str],
     ) -> list[str]:
         prefixes.update(["lit", "rdfs"])
-        item_id = variables.get("id", "LIT-XXX")
+        item_id = _validate_turtle_local_name(variables.get("id", "LIT-XXX"))
         title = _escape_turtle_string(variables.get("title", ""))
         lines = [
             f"<#{item_id}> a lit:Literature ;",
@@ -105,6 +125,7 @@ class TurtleBlockBuilder:
         source_idea = variables.get("source_idea")
         if source_idea:
             prefixes.add("idea")
+            _validate_turtle_local_name(source_idea)
             lines[-1] += " ;"
             lines.append(f"    lit:explores idea:{source_idea}")
         lines[-1] += " ."
@@ -116,7 +137,7 @@ class TurtleBlockBuilder:
         prefixes: set[str],
     ) -> list[str]:
         prefixes.update(["paper", "rdfs"])
-        item_id = variables.get("id", "PAPER-XXX")
+        item_id = _validate_turtle_local_name(variables.get("id", "PAPER-XXX"))
         title = _escape_turtle_string(variables.get("title", ""))
         return [
             f"<#{item_id}> a paper:Paper ;",
@@ -129,7 +150,7 @@ class TurtleBlockBuilder:
         prefixes: set[str],
     ) -> list[str]:
         prefixes.update(["hyp", "rdfs"])
-        item_id = variables.get("id", "H{paper}.{n}")
+        item_id = _validate_turtle_local_name(variables.get("id", "H{paper}.{n}"))
         title = _escape_turtle_string(variables.get("title", ""))
         paper = variables.get("paper")
         lines = [
@@ -138,6 +159,7 @@ class TurtleBlockBuilder:
         ]
         if paper:
             prefixes.add("paper")
+            _validate_turtle_local_name(str(paper))
             lines[-1] += " ;"
             lines.append(f"    hyp:paper paper:PAPER-{paper}")
         target = variables.get("target")
@@ -147,6 +169,7 @@ class TurtleBlockBuilder:
         source_idea = variables.get("source_idea")
         if source_idea:
             prefixes.add("idea")
+            _validate_turtle_local_name(source_idea)
             lines[-1] += " ;"
             lines.append(f"    hyp:sourceIdea idea:{source_idea}")
         literature = variables.get("literature")
@@ -170,7 +193,7 @@ class TurtleBlockBuilder:
         prefixes: set[str],
     ) -> list[str]:
         prefixes.update(["expr", "rdfs"])
-        item_id = variables.get("id", "EXPR-XXX")
+        item_id = _validate_turtle_local_name(variables.get("id", "EXPR-XXX"))
         title = _escape_turtle_string(variables.get("title", ""))
         paper = variables.get("paper")
         lines = [
@@ -179,11 +202,13 @@ class TurtleBlockBuilder:
         ]
         if paper:
             prefixes.add("paper")
+            _validate_turtle_local_name(str(paper))
             lines[-1] += " ;"
             lines.append(f"    expr:paper paper:PAPER-{paper}")
         hypothesis_id = variables.get("hypothesis_id")
         if hypothesis_id:
             prefixes.add("hyp")
+            _validate_turtle_local_name(hypothesis_id)
             lines[-1] += " ;"
             lines.append(f"    expr:hypothesis hyp:{hypothesis_id}")
         measures = variables.get("measures")
@@ -201,7 +226,7 @@ class TurtleBlockBuilder:
         prefixes: set[str],
     ) -> list[str]:
         prefixes.update(["measure", "rdfs"])
-        item_id = variables.get("id", "M-XXX")
+        item_id = _validate_turtle_local_name(variables.get("id", "M-XXX"))
         title = _escape_turtle_string(variables.get("title", ""))
         lines = [
             f"<#{item_id}> a measure:Measure ;",
@@ -247,4 +272,6 @@ def _format_uri_list(prefix: str, values: str | list[str]) -> str:
     """
     if isinstance(values, str):
         values = [values]
+    for v in values:
+        _validate_turtle_local_name(v)
     return ", ".join(f"{prefix}:{v}" for v in values)

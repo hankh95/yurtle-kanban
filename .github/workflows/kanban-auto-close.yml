@@ -42,13 +42,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout main (post-merge)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           ref: main
 
       - name: Setup Python (GitHub-hosted)
         if: ${{ vars.CI_RUNNER != 'self-hosted' }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.11"
 
@@ -86,12 +86,13 @@ jobs:
       - name: Move items
         if: steps.extract.outputs.ids != ''
         env:
+          ITEM_IDS: ${{ steps.extract.outputs.ids }}
           TARGET_STATUS: ${{ inputs.target-status }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           MOVED=0
-          for ITEM_ID in ${{ steps.extract.outputs.ids }}; do
+          for ITEM_ID in $ITEM_IDS; do
             echo "Moving $ITEM_ID to $TARGET_STATUS (closed by PR #$PR_NUMBER)"
             yurtle-kanban move "$ITEM_ID" "$TARGET_STATUS" \
               --no-commit \

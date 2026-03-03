@@ -9,6 +9,7 @@ Provides export to:
 
 import json
 from datetime import datetime
+from html import escape as html_escape
 from typing import Any
 
 from .models import Board, WorkItem, WorkItemStatus
@@ -40,7 +41,7 @@ def export_html(board: Board) -> str:
 
         columns_html.append(f"""
         <div class="column {wip_class}">
-            <h2>{col.name} <span class="count">({len(items)})</span> {wip_badge}</h2>
+            <h2>{html_escape(col.name)} <span class="count">({len(items)})</span> {wip_badge}</h2>
             <div class="cards">
                 {items_html or '<p class="empty">No items</p>'}
             </div>
@@ -200,14 +201,16 @@ def export_html(board: Board) -> str:
 
 def _render_html_card(item: WorkItem) -> str:
     """Render a work item as an HTML card."""
-    tags_html = " ".join(f'<span class="tag">{tag}</span>' for tag in item.tags[:3])
+    tags_html = " ".join(
+        f'<span class="tag">{html_escape(tag)}</span>' for tag in item.tags[:3]
+    )
 
     return f"""
-    <div class="card priority-{item.priority or "medium"}">
-        <div class="card-id">{item.item_type.value.upper()} {item.id}</div>
-        <div class="card-title">{item.title}</div>
+    <div class="card priority-{html_escape(item.priority or "medium")}">
+        <div class="card-id">{html_escape(item.item_type.value.upper())} {html_escape(item.id)}</div>
+        <div class="card-title">{html_escape(item.title)}</div>
         <div class="card-meta">
-            {f"<span>@{item.assignee}</span>" if item.assignee else ""}
+            {f"<span>@{html_escape(item.assignee)}</span>" if item.assignee else ""}
             {tags_html}
         </div>
     </div>

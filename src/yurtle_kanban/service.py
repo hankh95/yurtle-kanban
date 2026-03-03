@@ -2085,18 +2085,15 @@ class KanbanService:
         if forced:
             ttl_entry += '\n    kb:forcedMove "true"^^xsd:boolean ;'
         if closed_by:
-            import re as _re_uri
             # Sanitize URI: reject characters that could break TTL syntax
             # (newlines, angle brackets, spaces, backslashes)
-            if _re_uri.search(r'[<>\s\\"]', closed_by):
+            if re.search(r'[<>\s\\"]', closed_by):
                 raise ValueError(
                     f"Invalid URI for closed_by: contains disallowed characters: {closed_by!r}"
                 )
             ttl_entry += f'\n    kb:closedBy <{closed_by}> ;'
 
         # Check if yurtle block with status changes exists
-        import re
-
         # Match block with prefix declarations and statusChange predicates
         yurtle_pattern = (
             r"```yurtle\n@prefix kb: <https://yurtle\.dev/"
@@ -2561,6 +2558,13 @@ class KanbanService:
         Returns:
             Path to the created run folder.
         """
+        # Validate expr_id to prevent path traversal
+        if not re.match(r"^[A-Za-z]+-[A-Za-z0-9]+$", expr_id):
+            raise ValueError(
+                f"Invalid experiment ID format: {expr_id!r} — "
+                "expected PREFIX-ID (e.g., EXPR-130)"
+            )
+
         # Resolve run_by from git config if not provided
         if run_by is None:
             try:
@@ -2616,6 +2620,12 @@ class KanbanService:
             List of run metadata dicts with keys: timestamp, being, status,
             outcome, run_by, params, run_path.
         """
+        # Validate expr_id to prevent path traversal
+        if not re.match(r"^[A-Za-z]+-[A-Za-z0-9]+$", expr_id):
+            raise ValueError(
+                f"Invalid experiment ID format: {expr_id!r} — "
+                "expected PREFIX-ID (e.g., EXPR-130)"
+            )
         runs_base = self.repo_root / "research" / "runs" / expr_id
         if not runs_base.exists():
             return []
