@@ -593,6 +593,32 @@ jobs:
 
 ## Changelog
 
+### v1.14.0 (2026-03-03)
+
+**Auto-close on PR merge, security hardening, HDD methodology docs.**
+
+#### Added
+- **Auto-close kanban items on PR merge** — Reusable GitHub Actions workflow `kanban-auto-close.yml` extracts item IDs from PR body keywords (`Closes EXP-1023`, `Fixes CHORE-055`) and branch names (`exp-1023-*`), then moves items to target status (#28, #48)
+- **`--closed-by` flag on `move`** — Records graph provenance (`kb:closedBy <PR-URL>`) in the TTL status history block, making PR→item closure relationships queryable (#28)
+- **`pr_id_extractor` module** — Testable Python helper for extracting kanban item IDs from PR bodies and branch names. Supports all 17 item prefixes (#28)
+- **`--board` option on `list`** — Filter items by board name in multi-board configurations (#45)
+- **`compute_requirement` field** — First-class field on work items for compute resource tracking (#44)
+- **HDD `critical-path` command** — Cross-board dependency engine for research item chains (#43)
+- **HDD methodology guide** — Full reference docs with worked examples and fleet automation (#46)
+
+#### Security
+- **GitHub Actions SHA pinning** — All 10 actions pinned to commit SHAs instead of floating version tags (#49)
+- **TTL injection prevention** — `_validate_turtle_local_name()` for prefixed names, `_safe_uri()` for angle-bracket URIs (#49)
+- **HTML export XSS prevention** — `html.escape()` applied to all user-controlled values in HTML export (#49)
+- **YAML frontmatter escaping** — Title values escaped in `to_markdown()` (#49)
+- **`expr_id` path traversal validation** — Regex validation before filesystem path construction (#49)
+- **`closed_by` URI sanitization** — Rejects `<`, `>`, whitespace, backslash, and quote characters in URIs (#48)
+- **Workflow script injection prevention** — PR body passed via env var instead of `${{ }}` interpolation (#49)
+- **Least-privilege permissions** — `contents: read` added to CI workflow (#49)
+
+#### Fixed
+- **HDD state name preservation** — Move write-back preserves original HDD state names (#42)
+
 ### v1.13.0 (2026-02-28 → 2026-03-01)
 
 **Experiment run tracking, HDD registry & validation, priority ranking, board-aware move.**
