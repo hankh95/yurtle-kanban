@@ -1,0 +1,117 @@
+# Reusable workflow: Auto-close kanban items on PR merge
+#
+# Issue #28: When a PR merges, extract linked item IDs from the PR body
+# (Closes EXP-1023, Fixes CHORE-055) or branch name (exp-1023-*), then
+# move them to the target status with graph provenance (kb:closedBy).
+#
+# Usage in consuming repos:
+#
+#   name: Auto-close kanban items
+#   on:
+#     pull_request:
+#       types: [closed]
+#   jobs:
+#     auto-close:
+#       if: github.event.pull_request.merged == true
+#       uses: hankh95/yurtle-kanban/.github/workflows/kanban-auto-close.yml@main
+#       with:
+#         target-status: done
+
+name: Kanban Auto-Close
+
+on:
+  workflow_call:
+    inputs:
+      target-status:
+        description: "Status to move items to (e.g., done, review)"
+        required: false
+        default: "done"
+        type: string
+      kanban-version:
+        description: "yurtle-kanban version to install (git ref)"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  auto-close:
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main (post-merge)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Python (GitHub-hosted)
+        if: ${{ vars.CI_RUNNER != 'self-hosted' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Python (self-hosted)
+        if: ${{ vars.CI_RUNNER == 'self-hosted' }}
+        run: |
+          echo "$(python3.11 -c 'import sys; print(sys.prefix)')/bin" >> "$GITHUB_PATH"
+          python3.11 --version
+
+      - name: Install yurtle-kanban
+        run: pip install "git+https://github.com/hankh95/yurtle-kanban.git@${{ inputs.kanban-version }}"
+
+      - name: Extract item IDs
+        id: extract
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          IDS=$(python3 -c "
+          from yurtle_kanban.pr_id_extractor import extract_all
+          import os
+          body = os.environ.get('PR_BODY', '') or ''
+          branch = os.environ.get('PR_BRANCH', '') or ''
+          ids = extract_all(body, branch)
+          print(' '.join(ids))
+          ")
+
+          echo "ids=$IDS" >> "$GITHUB_OUTPUT"
+          if [ -z "$IDS" ]; then
+            echo "::notice::No kanban item IDs found in PR body or branch name"
+          else
+            echo "Found item IDs: $IDS"
+          fi
+
+      - name: Move items
+        if: steps.extract.outputs.ids != ''
+        env:
+          TARGET_STATUS: ${{ inputs.target-status }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          MOVED=0
+          for ITEM_ID in ${{ steps.extract.outputs.ids }}; do
+            echo "Moving $ITEM_ID to $TARGET_STATUS (closed by PR #$PR_NUMBER)"
+            yurtle-kanban move "$ITEM_ID" "$TARGET_STATUS" \
+              --no-commit \
+              --assign "github-actions[bot]" \
+              --closed-by "$PR_URL" 2>/dev/null && {
+              MOVED=$((MOVED + 1))
+              echo "  ✓ $ITEM_ID moved to $TARGET_STATUS"
+            } || {
+              echo "::warning::Could not move $ITEM_ID to $TARGET_STATUS (may not exist or already in target status)"
+            }
+          done
+          echo "moved=$MOVED" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        if: steps.extract.outputs.ids != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet || {
+            git commit -m "chore: auto-close kanban items (PR #${{ github.event.pull_request.number }} merged) [skip ci]"
+            git push origin main
+          }

@@ -83,7 +83,7 @@ yurtle-kanban export --format json
 | `init` | Initialize with theme, scaffold directories + templates |
 | `list` | List work items with optional filters |
 | `create` | Create a new work item (`--push` for atomic multi-agent safety) |
-| `move` | Move item to new status (with `--assign`, `--force`) |
+| `move` | Move item to new status (with `--assign`, `--force`, `--closed-by`) |
 | `show` | Show item details |
 | `board` | Display kanban board (`board research`, `board --all`, `board --campaign VOY-XXX`) |
 | `boards` | List configured boards |
@@ -506,7 +506,54 @@ For integrations and CI/CD.
 
 ## GitHub Actions
 
-Auto-update board on push:
+### Auto-close items on PR merge
+
+When a PR merges, automatically move linked kanban items to `done` (or `review`).
+Uses a **reusable workflow** shipped in this repo:
+
+```yaml
+# .github/workflows/kanban-auto-close.yml
+name: Auto-close kanban items
+on:
+  pull_request:
+    types: [closed]
+jobs:
+  auto-close:
+    if: github.event.pull_request.merged == true
+    uses: hankh95/yurtle-kanban/.github/workflows/kanban-auto-close.yml@main
+    with:
+      target-status: done       # or "review"
+      kanban-version: main      # yurtle-kanban git ref
+```
+
+**How items are detected** (two strategies, keywords take priority):
+
+1. **PR body keywords** — `Closes EXP-1023`, `Fixes CHORE-055`, `Resolves FEAT-042`
+   (case-insensitive, supports multiple items per PR)
+2. **Branch name fallback** — `exp-1023-title` → `EXP-1023`, `chore-055-cleanup` → `CHORE-055`
+
+All item prefixes are supported (EXP, CHORE, FEAT, VOY, BUG, EPIC, ISSUE, TASK,
+IDEA, DIR, HAZ, SIG, LIT, PAPER, H, EXPR, M).
+
+**Graph provenance:** Each auto-close records `kb:closedBy <PR-URL>` in the item's
+Turtle status history block, making PR→item relationships graph-queryable:
+
+```turtle
+<> kb:statusChange [
+    kb:status kb:done ;
+    kb:at "2026-03-03T12:34:56"^^xsd:dateTime ;
+    kb:by "github-actions[bot]" ;
+    kb:closedBy <https://github.com/owner/repo/pull/42> ;
+] .
+```
+
+You can also use `--closed-by` manually:
+
+```bash
+yurtle-kanban move EXP-123 done --closed-by "https://github.com/owner/repo/pull/42"
+```
+
+### Auto-update board on push
 
 ```yaml
 # .github/workflows/kanban-board.yml
