@@ -205,6 +205,21 @@ class WorkItem:
             "triple_count": len(self.graph) if self.graph else 0,
         }
 
+    @staticmethod
+    def _esc(value: str) -> str:
+        """Escape a string for Turtle string literals."""
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
+    @staticmethod
+    def _safe_uri(value: str) -> str:
+        """Sanitize a value for use inside Turtle angle-bracket URIs.
+
+        Strips characters that could break TTL syntax (<, >, newlines,
+        spaces). Returns the sanitized value for use inside <...>.
+        """
+        import re as _re
+        return _re.sub(r'[<>\s\\"]', "", value)
+
     def to_yurtle(self) -> str:
         """Generate Yurtle block content for this work item."""
         lines = [
@@ -212,7 +227,7 @@ class WorkItem:
             "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .",
             "",
             f"<> a kb:{self.item_type.value.title()} ;",
-            f'   kb:id "{self.id}" ;',
+            f'   kb:id "{self._esc(self.id)}" ;',
             f"   kb:status kb:{self.status.value} ;",
         ]
 
@@ -220,32 +235,32 @@ class WorkItem:
             lines.append(f"   kb:priority kb:{self.priority} ;")
 
         if self.assignee:
-            lines.append(f"   kb:assignee <{self.assignee}> ;")
+            lines.append(f"   kb:assignee <{self._safe_uri(self.assignee)}> ;")
 
         if self.created:
             lines.append(f'   kb:created "{self.created.isoformat()}"^^xsd:date ;')
 
         if self.tags:
-            tag_str = ", ".join(f'"{tag}"' for tag in self.tags)
+            tag_str = ", ".join(f'"{self._esc(tag)}"' for tag in self.tags)
             lines.append(f"   kb:tag {tag_str} ;")
 
         if self.depends_on:
-            deps_str = ", ".join(f"<{dep}>" for dep in self.depends_on)
+            deps_str = ", ".join(f"<{self._safe_uri(dep)}>" for dep in self.depends_on)
             lines.append(f"   kb:dependsOn {deps_str} ;")
 
         if self.related:
-            rel_str = ", ".join(f"<{rel}>" for rel in self.related)
+            rel_str = ", ".join(f"<{self._safe_uri(rel)}>" for rel in self.related)
             lines.append(f"   kb:related {rel_str} ;")
 
         if self.resolution:
-            lines.append(f'   kb:resolution "{self.resolution}" ;')
+            lines.append(f'   kb:resolution "{self._esc(self.resolution)}" ;')
 
         if self.superseded_by:
-            refs_str = ", ".join(f"<{ref}>" for ref in self.superseded_by)
+            refs_str = ", ".join(f"<{self._safe_uri(ref)}>" for ref in self.superseded_by)
             lines.append(f"   kb:supersededBy {refs_str} ;")
 
         if self.compute_requirement:
-            lines.append(f'   kb:computeRequirement "{self.compute_requirement}" ;')
+            lines.append(f'   kb:computeRequirement "{self._esc(self.compute_requirement)}" ;')
 
         # Remove trailing semicolon from last line and add period
         lines[-1] = lines[-1].rstrip(" ;") + " ."
@@ -261,7 +276,7 @@ class WorkItem:
         lines = [
             "---",
             f"id: {self.id}",
-            f'title: "{self.title}"',
+            'title: "{}"'.format(self.title.replace('"', '\\"')),
             f"type: {self.item_type.value}",
             f"status: {self.status.value}",
         ]
