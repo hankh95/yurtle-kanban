@@ -295,12 +295,14 @@ kanban:
 @click.option("--status", "-s", help="Filter by status (backlog, ready, in_progress, review, done)")
 @click.option("--type", "-t", "item_type", help="Filter by type (feature, bug, epic, task)")
 @click.option("--assignee", "-a", help="Filter by assignee")
+@click.option("--priority", "-p", help="Filter by priority (critical, high, medium, low). Comma-separated for multiple.")
 @click.option("--board", "-b", "board_name", help="Filter to a specific board (multi-board mode)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def list_items(
     status: str | None,
     item_type: str | None,
     assignee: str | None,
+    priority: str | None,
     board_name: str | None,
     as_json: bool,
 ):
@@ -324,11 +326,21 @@ def list_items(
             console.print(f"[red]Unknown type: {item_type}[/red]")
             sys.exit(1)
 
+    priority_filter = None
+    if priority:
+        valid_priorities = {"critical", "high", "medium", "low"}
+        priority_filter = [p.strip().lower() for p in priority.split(",")]
+        invalid = [p for p in priority_filter if p not in valid_priorities]
+        if invalid:
+            console.print(f"[red]Unknown priority: {', '.join(invalid)}. Valid: critical, high, medium, low[/red]")
+            sys.exit(1)
+
     items = service.get_items(
         status=status_filter,
         item_type=type_filter,
         assignee=assignee,
         board=board_name,
+        priority=priority_filter,
     )
 
     if not items:
