@@ -1750,6 +1750,7 @@ class KanbanService:
         validate_workflow: bool = True,
         assignee: str | None = None,
         skip_wip_check: bool = False,
+        closed_by: str | None = None,
     ) -> WorkItem:
         """Move a work item to a new status.
 
@@ -1761,6 +1762,8 @@ class KanbanService:
             validate_workflow: Whether to validate against workflow rules
             assignee: Optional assignee to set (e.g., 'Claude-M5', 'Claude-DGX')
             skip_wip_check: Whether to skip WIP limit validation
+            closed_by: Optional URI recording what triggered this move
+                (e.g., a PR URL). Written as kb:closedBy in the TTL block.
         """
         item = self.get_item(item_id)
         if not item:
@@ -1804,7 +1807,10 @@ class KanbanService:
 
         # Update file with status history
         forced = not validate_workflow
-        self._update_item_file_with_history(item, old_status, new_status, assignee, forced=forced)
+        self._update_item_file_with_history(
+            item, old_status, new_status, assignee,
+            forced=forced, closed_by=closed_by,
+        )
 
         # Git commit if requested
         if commit:
@@ -2033,6 +2039,7 @@ class KanbanService:
         new_status: WorkItemStatus,
         assignee: str | None = None,
         forced: bool = False,
+        closed_by: str | None = None,
     ) -> None:
         """Update file and append status change to yurtle knowledge block.
 
@@ -2049,6 +2056,8 @@ class KanbanService:
         ```
 
         When forced=True, an additional kb:forcedMove triple is recorded.
+        When closed_by is set, a kb:closedBy triple records the triggering
+        artifact (e.g., a PR URL), making closure provenance graph-queryable.
         """
         content = item.file_path.read_text()
 
@@ -2075,6 +2084,15 @@ class KanbanService:
     kb:by "{agent}" ;'''
         if forced:
             ttl_entry += '\n    kb:forcedMove "true"^^xsd:boolean ;'
+        if closed_by:
+            import re as _re_uri
+            # Sanitize URI: reject characters that could break TTL syntax
+            # (newlines, angle brackets, spaces, backslashes)
+            if _re_uri.search(r'[<>\s\\"]', closed_by):
+                raise ValueError(
+                    f"Invalid URI for closed_by: contains disallowed characters: {closed_by!r}"
+                )
+            ttl_entry += f'\n    kb:closedBy <{closed_by}> ;'
 
         # Check if yurtle block with status changes exists
         import re

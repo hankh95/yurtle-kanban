@@ -432,6 +432,7 @@ def create(
     help="Export board to file after move (e.g., 'kanban-work/KANBAN-BOARD.md')",
 )
 @click.option("--force", "-f", is_flag=True, help="Skip WIP limit and workflow validation")
+@click.option("--closed-by", help="URI recording what triggered this move (e.g., PR URL)")
 def move(
     item_id: str,
     new_status: str,
@@ -440,6 +441,7 @@ def move(
     assign: str | None,
     export_board: str | None,
     force: bool,
+    closed_by: str | None,
 ):
     """Move a work item to a new status.
 
@@ -448,6 +450,7 @@ def move(
         yurtle-kanban move EXP-123 in_progress --assign "Claude-M5"
         yurtle-kanban move EXP-123 done --export-board kanban-work/KANBAN-BOARD.md
         yurtle-kanban move EXP-123 ready --force  # Skip WIP limit check
+        yurtle-kanban move EXP-123 done --closed-by "https://github.com/repo/pull/42"
     """
     service = get_service()
 
@@ -474,6 +477,7 @@ def move(
             assignee=assign,
             skip_wip_check=force,
             validate_workflow=not force,
+            closed_by=closed_by,
         )
         console.print(f"[green]Moved {item.id} to {status.value}[/green]")
         if assign:
