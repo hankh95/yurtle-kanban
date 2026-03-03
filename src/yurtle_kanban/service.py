@@ -2085,6 +2085,13 @@ class KanbanService:
         if forced:
             ttl_entry += '\n    kb:forcedMove "true"^^xsd:boolean ;'
         if closed_by:
+            import re as _re_uri
+            # Sanitize URI: reject characters that could break TTL syntax
+            # (newlines, angle brackets, spaces, backslashes)
+            if _re_uri.search(r'[<>\s\\"]', closed_by):
+                raise ValueError(
+                    f"Invalid URI for closed_by: contains disallowed characters: {closed_by!r}"
+                )
             ttl_entry += f'\n    kb:closedBy <{closed_by}> ;'
 
         # Check if yurtle block with status changes exists

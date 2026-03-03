@@ -94,6 +94,42 @@ class TestClosedByProvenance:
         assert "kb:forcedMove" in content
         assert pr_url in content
 
+    def test_closed_by_rejects_angle_bracket(self, kanban_setup):
+        """A URI with '>' should be rejected to prevent TTL injection."""
+        service = kanban_setup["service"]
+        with pytest.raises(ValueError, match="disallowed characters"):
+            service.move_item(
+                "EXP-100",
+                WorkItemStatus.DONE,
+                commit=False,
+                validate_workflow=False,
+                closed_by="https://evil.com> ; kb:status kb:backlog ; <x",
+            )
+
+    def test_closed_by_rejects_newline(self, kanban_setup):
+        """A URI with newlines should be rejected to prevent TTL injection."""
+        service = kanban_setup["service"]
+        with pytest.raises(ValueError, match="disallowed characters"):
+            service.move_item(
+                "EXP-100",
+                WorkItemStatus.DONE,
+                commit=False,
+                validate_workflow=False,
+                closed_by="https://evil.com\nkb:status kb:backlog",
+            )
+
+    def test_closed_by_rejects_spaces(self, kanban_setup):
+        """A URI with spaces should be rejected."""
+        service = kanban_setup["service"]
+        with pytest.raises(ValueError, match="disallowed characters"):
+            service.move_item(
+                "EXP-100",
+                WorkItemStatus.DONE,
+                commit=False,
+                validate_workflow=False,
+                closed_by="https://evil.com/not a valid uri",
+            )
+
     def test_closed_by_appears_in_turtle_block(self, kanban_setup):
         """The kb:closedBy triple should be inside the yurtle block."""
         service = kanban_setup["service"]

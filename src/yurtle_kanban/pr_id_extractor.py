@@ -13,12 +13,12 @@ import re
 
 # All known item ID prefixes, longest first to avoid partial matches
 # (e.g., "PAPER" before "P", "EXPR" before "EXP").
+# These are the actual kanban ID prefixes — NOT the full type names
+# (e.g., EXP not EXPEDITION, FEAT not FEATURE).
 PREFIXES = (
-    "EXPEDITION", "EXPERIMENT", "LITERATURE", "HYPOTHESIS",
-    "DIRECTIVE", "FEATURE", "MEASURE", "VOYAGE", "SIGNAL",
-    "HAZARD", "PAPER", "ISSUE", "CHORE", "EPIC", "EXPR",
-    "FEAT", "IDEA", "TASK", "BUG", "DIR", "EXP", "HAZ",
-    "LIT", "SIG", "VOY", "M", "H",
+    "PAPER", "ISSUE", "CHORE", "EPIC", "EXPR",
+    "FEAT", "IDEA", "TASK", "BUG", "DIR", "EXP",
+    "HAZ", "LIT", "SIG", "VOY", "M", "H",
 )
 
 # Pattern for PR body keywords: Closes EXP-1023, Fixes CHORE-055, etc.

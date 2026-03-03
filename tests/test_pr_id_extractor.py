@@ -80,6 +80,12 @@ class TestExtractIdsFromText:
         text = "This PR (Closes EXP-100) does stuff"
         assert extract_ids_from_text(text) == ["EXP-100"]
 
+    def test_full_type_name_not_matched(self):
+        """Full type names should NOT match — only actual kanban ID prefixes."""
+        assert extract_ids_from_text("Closes EXPEDITION-100") == []
+        assert extract_ids_from_text("Closes EXPERIMENT-100") == []
+        assert extract_ids_from_text("Closes FEATURE-100") == []
+
 
 # ---------------------------------------------------------------------------
 # extract_id_from_branch
@@ -116,6 +122,18 @@ class TestExtractIdFromBranch:
 
     def test_no_number(self):
         assert extract_id_from_branch("feature-branch") is None
+
+    def test_full_type_name_not_matched(self):
+        """Full type names (expedition, experiment, etc.) should NOT match.
+
+        Only actual kanban ID prefixes (exp, expr, etc.) are valid.
+        Regression test for review finding on PR #48.
+        """
+        assert extract_id_from_branch("expedition-100-title") is None
+        assert extract_id_from_branch("experiment-100-title") is None
+        assert extract_id_from_branch("literature-100-title") is None
+        assert extract_id_from_branch("hypothesis-100-title") is None
+        assert extract_id_from_branch("feature-100-title") is None
 
     def test_case_insensitive(self):
         assert extract_id_from_branch("EXP-100-title") == "EXP-100"
