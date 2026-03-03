@@ -215,7 +215,7 @@ Expedition (EXP-), Voyage (VOY-), Chore (CHORE-), Hazard (HAZ-), Signal (SIG-)
 Columns: Harbor → Provisioning → Underway → Approaching Port → Arrived (+ Stranded)
 ```
 
-**HDD (Hypothesis-Driven Development):**
+**HDD (Hypothesis-Driven Development):** ([methodology deep-dive](docs/hdd-methodology.md))
 ```
 Idea (IDEA-R-), Literature (LIT-), Paper (PAPER-), Hypothesis (H{paper}.{n}), Experiment (EXPR-), Measure (M-)
 Columns: Draft → Active → Complete → Abandoned
