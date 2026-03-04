@@ -84,6 +84,7 @@ class BoardConfig:
     path: str = "work/"
     scan_paths: list[str] = field(default_factory=list)
     wip_limits: dict[str, int] = field(default_factory=dict)
+    gates: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     ignore: list[str] = field(default_factory=lambda: ["**/archive/**", "**/templates/**"])
 
     def get_path(self) -> Path:
@@ -103,6 +104,7 @@ class BoardConfig:
             path=data.get("path", "work/"),
             scan_paths=data.get("scan_paths", []),
             wip_limits=data.get("wip_limits", {}),
+            gates=data.get("gates", {}),
             ignore=data.get("ignore", ["**/archive/**", "**/templates/**"]),
         )
 
@@ -117,6 +119,8 @@ class BoardConfig:
             result["scan_paths"] = self.scan_paths
         if self.wip_limits:
             result["wip_limits"] = self.wip_limits
+        if self.gates:
+            result["gates"] = self.gates
         if self.ignore != ["**/archive/**", "**/templates/**"]:
             result["ignore"] = self.ignore
         return result
@@ -134,6 +138,7 @@ class KanbanConfig:
     theme: str = "software"
     paths: PathConfig = field(default_factory=PathConfig)
     workflows: dict[str, str] = field(default_factory=dict)
+    gates: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     # Multi-board config (v2)
     version: str = CONFIG_VERSION_SINGLE
@@ -229,6 +234,7 @@ class KanbanConfig:
             theme=kanban_data.get("theme", "software"),
             paths=paths,
             workflows=kanban_data.get("workflows", {}),
+            gates=kanban_data.get("gates", {}),
         )
 
     @classmethod
@@ -283,6 +289,9 @@ class KanbanConfig:
 
         if self.paths.ignore:
             data["kanban"]["paths"]["ignore"] = self.paths.ignore
+
+        if self.gates:
+            data["kanban"]["gates"] = self.gates
 
         return data
 

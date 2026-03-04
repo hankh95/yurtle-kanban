@@ -445,6 +445,8 @@ def create(
 )
 @click.option("--force", "-f", is_flag=True, help="Skip WIP limit and workflow validation")
 @click.option("--closed-by", help="URI recording what triggered this move (e.g., PR URL)")
+@click.option("--skip-gates", is_flag=True, help="Skip transition gate checks (Captain override)")
+@click.option("--self-reviewed", is_flag=True, help="Confirm self-review was performed")
 def move(
     item_id: str,
     new_status: str,
@@ -454,6 +456,8 @@ def move(
     export_board: str | None,
     force: bool,
     closed_by: str | None,
+    skip_gates: bool,
+    self_reviewed: bool,
 ):
     """Move a work item to a new status.
 
@@ -463,6 +467,8 @@ def move(
         yurtle-kanban move EXP-123 done --export-board kanban-work/KANBAN-BOARD.md
         yurtle-kanban move EXP-123 ready --force  # Skip WIP limit check
         yurtle-kanban move EXP-123 done --closed-by "https://github.com/repo/pull/42"
+        yurtle-kanban move EXP-123 review --self-reviewed  # Pass self-review gate
+        yurtle-kanban move EXP-123 review --skip-gates  # Skip all transition gates
     """
     service = get_service()
 
@@ -480,6 +486,11 @@ def move(
             console.print(f"Valid statuses: {', '.join(valid)}")
             sys.exit(1)
 
+    # Build gate context from CLI flags
+    gate_context: dict[str, object] = {}
+    if self_reviewed:
+        gate_context["self_reviewed"] = True
+
     try:
         item = service.move_item(
             item_id.upper(),
@@ -490,6 +501,8 @@ def move(
             skip_wip_check=force,
             validate_workflow=not force,
             closed_by=closed_by,
+            skip_gates=skip_gates or force,
+            gate_context=gate_context,
         )
         console.print(f"[green]Moved {item.id} to {status.value}[/green]")
         if assign:

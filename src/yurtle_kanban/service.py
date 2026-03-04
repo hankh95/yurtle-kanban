@@ -26,6 +26,7 @@ from .hooks import HookContext, HookEngine, HookEvent
 
 if TYPE_CHECKING:
     from .config import BoardConfig
+    from .gates import GateResult
 from .models import Board, Column, Comment, WorkItem, WorkItemStatus, WorkItemType
 from .turtle_builder import PREFIXES
 from .workflow import WorkflowConfig, WorkflowParser
@@ -1755,6 +1756,8 @@ class KanbanService:
         assignee: str | None = None,
         skip_wip_check: bool = False,
         closed_by: str | None = None,
+        skip_gates: bool = False,
+        gate_context: dict[str, Any] | None = None,
     ) -> WorkItem:
         """Move a work item to a new status.
 
@@ -1768,6 +1771,9 @@ class KanbanService:
             skip_wip_check: Whether to skip WIP limit validation
             closed_by: Optional URI recording what triggered this move
                 (e.g., a PR URL). Written as kb:closedBy in the TTL block.
+            skip_gates: Whether to skip transition gate checks
+            gate_context: Extra context for gate evaluation (e.g., CLI flags
+                like ``{"self_reviewed": True}``)
         """
         item = self.get_item(item_id)
         if not item:
@@ -1801,6 +1807,23 @@ class KanbanService:
                             f"({current_count}/{col.wip_limit})"
                         )
 
+        # Evaluate transition gates (unless skipped)
+        gates_skipped = False
+        if not skip_gates:
+            gate_results = self._evaluate_gates(
+                item, old_status, new_status, gate_context or {}
+            )
+            blocking = [
+                r for r in gate_results
+                if not r.passed and r.severity == "blocking"
+            ]
+            if blocking:
+                msgs = "; ".join(r.message for r in blocking)
+                raise ValueError(f"Gate check failed: {msgs}")
+        elif self._has_gates_configured(item):
+            # Only record gates_skipped when gates actually exist
+            gates_skipped = True
+
         # Update item
         item.status = new_status
         item.updated = datetime.now()
@@ -1814,6 +1837,7 @@ class KanbanService:
         self._update_item_file_with_history(
             item, old_status, new_status, assignee,
             forced=forced, closed_by=closed_by,
+            gates_skipped=gates_skipped,
         )
 
         # Git commit if requested
@@ -1958,6 +1982,41 @@ class KanbanService:
             else:
                 return False, f"Invalid transition from {item.status.value} to {new_status.value}"
 
+    def _evaluate_gates(
+        self,
+        item: WorkItem,
+        old_status: WorkItemStatus,
+        new_status: WorkItemStatus,
+        context: dict[str, Any],
+    ) -> list[GateResult]:
+        """Evaluate transition gates from board config.
+
+        Returns list of GateResult objects (both passed and failed).
+        Supports both v2 multi-board (per-board gates) and v1 single-board
+        (top-level gates) configurations.
+        """
+        # v2: per-board gates
+        board_config = self._get_board_for_item(item)
+        if board_config and board_config.gates:
+            gate_configs = board_config.gates
+        elif self.config.gates:
+            # v1: top-level gates on KanbanConfig
+            gate_configs = self.config.gates
+        else:
+            return []
+
+        from .gates import GateEvaluator
+
+        evaluator = GateEvaluator(gate_configs)
+        return evaluator.evaluate(item, old_status.value, new_status.value, context)
+
+    def _has_gates_configured(self, item: WorkItem) -> bool:
+        """Check if any gates are configured for this item's board."""
+        board_config = self._get_board_for_item(item)
+        if board_config and board_config.gates:
+            return True
+        return bool(self.config.gates)
+
     def _is_valid_transition(self, from_status: WorkItemStatus, to_status: WorkItemStatus) -> bool:
         """Check if a status transition is valid (default rules)."""
         # Define valid transitions
@@ -2044,6 +2103,7 @@ class KanbanService:
         assignee: str | None = None,
         forced: bool = False,
         closed_by: str | None = None,
+        gates_skipped: bool = False,
     ) -> None:
         """Update file and append status change to yurtle knowledge block.
 
@@ -2062,6 +2122,7 @@ class KanbanService:
         When forced=True, an additional kb:forcedMove triple is recorded.
         When closed_by is set, a kb:closedBy triple records the triggering
         artifact (e.g., a PR URL), making closure provenance graph-queryable.
+        When gates_skipped=True, a kb:gatesSkipped triple is recorded.
         """
         content = item.file_path.read_text()
 
@@ -2088,6 +2149,8 @@ class KanbanService:
     kb:by "{agent}" ;'''
         if forced:
             ttl_entry += '\n    kb:forcedMove "true"^^xsd:boolean ;'
+        if gates_skipped:
+            ttl_entry += '\n    kb:gatesSkipped "true"^^xsd:boolean ;'
         if closed_by:
             # Sanitize URI: reject characters that could break TTL syntax
             # (newlines, angle brackets, spaces, backslashes)
