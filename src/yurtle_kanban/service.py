@@ -26,6 +26,7 @@ from .hooks import HookContext, HookEngine, HookEvent
 
 if TYPE_CHECKING:
     from .config import BoardConfig
+    from .gates import GateResult
 from .models import Board, Column, Comment, WorkItem, WorkItemStatus, WorkItemType
 from .turtle_builder import PREFIXES
 from .workflow import WorkflowConfig, WorkflowParser
@@ -1807,7 +1808,7 @@ class KanbanService:
                         )
 
         # Evaluate transition gates (unless skipped)
-        gates_skipped = skip_gates
+        gates_skipped = False
         if not skip_gates:
             gate_results = self._evaluate_gates(
                 item, old_status, new_status, gate_context or {}
@@ -1819,6 +1820,9 @@ class KanbanService:
             if blocking:
                 msgs = "; ".join(r.message for r in blocking)
                 raise ValueError(f"Gate check failed: {msgs}")
+        elif self._has_gates_configured(item):
+            # Only record gates_skipped when gates actually exist
+            gates_skipped = True
 
         # Update item
         item.status = new_status
@@ -1984,19 +1988,34 @@ class KanbanService:
         old_status: WorkItemStatus,
         new_status: WorkItemStatus,
         context: dict[str, Any],
-    ) -> list:
+    ) -> list[GateResult]:
         """Evaluate transition gates from board config.
 
         Returns list of GateResult objects (both passed and failed).
+        Supports both v2 multi-board (per-board gates) and v1 single-board
+        (top-level gates) configurations.
         """
+        # v2: per-board gates
         board_config = self._get_board_for_item(item)
-        if not board_config or not board_config.gates:
+        if board_config and board_config.gates:
+            gate_configs = board_config.gates
+        elif self.config.gates:
+            # v1: top-level gates on KanbanConfig
+            gate_configs = self.config.gates
+        else:
             return []
 
         from .gates import GateEvaluator
 
-        evaluator = GateEvaluator(board_config.gates)
+        evaluator = GateEvaluator(gate_configs)
         return evaluator.evaluate(item, old_status.value, new_status.value, context)
+
+    def _has_gates_configured(self, item: WorkItem) -> bool:
+        """Check if any gates are configured for this item's board."""
+        board_config = self._get_board_for_item(item)
+        if board_config and board_config.gates:
+            return True
+        return bool(self.config.gates)
 
     def _is_valid_transition(self, from_status: WorkItemStatus, to_status: WorkItemStatus) -> bool:
         """Check if a status transition is valid (default rules)."""

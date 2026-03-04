@@ -138,6 +138,7 @@ class KanbanConfig:
     theme: str = "software"
     paths: PathConfig = field(default_factory=PathConfig)
     workflows: dict[str, str] = field(default_factory=dict)
+    gates: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     # Multi-board config (v2)
     version: str = CONFIG_VERSION_SINGLE
@@ -233,6 +234,7 @@ class KanbanConfig:
             theme=kanban_data.get("theme", "software"),
             paths=paths,
             workflows=kanban_data.get("workflows", {}),
+            gates=kanban_data.get("gates", {}),
         )
 
     @classmethod
@@ -287,6 +289,9 @@ class KanbanConfig:
 
         if self.paths.ignore:
             data["kanban"]["paths"]["ignore"] = self.paths.ignore
+
+        if self.gates:
+            data["kanban"]["gates"] = self.gates
 
         return data
 

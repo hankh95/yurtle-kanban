@@ -9,7 +9,7 @@ from click.testing import CliRunner
 
 from yurtle_kanban.cli import main
 from yurtle_kanban.config import BoardConfig, KanbanConfig
-from yurtle_kanban.gates import GateDefinition, GateEvaluator, GateResult
+from yurtle_kanban.gates import GateEvaluator
 from yurtle_kanban.models import WorkItem, WorkItemStatus, WorkItemType
 from yurtle_kanban.service import KanbanService
 
@@ -111,6 +111,50 @@ status: backlog
     config = KanbanConfig.load(config_path)
     service = KanbanService(config, tmp_path)
     return {"service": service, "item_file": item_file}
+
+
+@pytest.fixture
+def kanban_v1_with_gates(tmp_path):
+    """Minimal v1 single-board kanban setup with gates configured."""
+    config_path = tmp_path / ".kanban" / "config.yaml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        """
+kanban:
+  theme: software
+  paths:
+    root: work/
+  workflows: {}
+  gates:
+    "* -> in_progress":
+      - id: require_assignee
+        check: item.assignee
+        message: "Assignee required (use --assign)"
+    "in_progress -> review":
+      - id: require_self_review
+        check: context.self_reviewed
+        message: "Self-review required (use --self-reviewed)"
+"""
+    )
+
+    (tmp_path / "work").mkdir(parents=True)
+
+    item_file = tmp_path / "work" / "EXP-300.md"
+    item_file.write_text(
+        """---
+id: EXP-300
+title: "V1 Gate Test"
+type: expedition
+status: backlog
+assignee: Mini
+---
+# V1 Gate Test
+"""
+    )
+
+    config = KanbanConfig.load(config_path)
+    service = KanbanService(config, tmp_path)
+    return {"service": service, "item_file": item_file, "config": config}
 
 
 # ── TestGateEvaluation (unit) ──────────────────────────────────────────
@@ -435,6 +479,37 @@ class TestGateConfigParsing:
         )
         assert len(results) == 0
 
+    def test_v1_config_parses_gates(self, kanban_v1_with_gates):
+        """v1 single-board config loads gates into KanbanConfig.gates."""
+        config = kanban_v1_with_gates["config"]
+        assert "* -> in_progress" in config.gates
+        assert config.gates["* -> in_progress"][0]["id"] == "require_assignee"
+
+    def test_v1_config_serializes_gates(self):
+        """v1 config round-trips gates through save/load."""
+        from yurtle_kanban.config import KanbanConfig, PathConfig
+
+        config = KanbanConfig(
+            theme="software",
+            paths=PathConfig(root="work/"),
+            gates={
+                "* -> in_progress": [
+                    {"id": "g1", "check": "item.assignee", "message": "test"}
+                ]
+            },
+        )
+        d = config._to_dict_v1()
+        assert "gates" in d["kanban"]
+        assert "* -> in_progress" in d["kanban"]["gates"]
+
+    def test_v1_config_omits_gates_when_empty(self):
+        """v1 config omits gates key when empty."""
+        from yurtle_kanban.config import KanbanConfig, PathConfig
+
+        config = KanbanConfig(theme="software", paths=PathConfig(root="work/"))
+        d = config._to_dict_v1()
+        assert "gates" not in d["kanban"]
+
     def test_arrow_without_spaces_normalized(self):
         """Transition key 'a->b' is normalized to 'a -> b'."""
         evaluator = GateEvaluator(
@@ -578,6 +653,61 @@ class TestGateIntegration:
             validate_workflow=False,
         )
         assert item.status == WorkItemStatus.IN_PROGRESS
+
+    def test_v1_gates_block_move(self, kanban_v1_with_gates):
+        """v1 single-board config gates block transitions."""
+        service = kanban_v1_with_gates["service"]
+        item_file = kanban_v1_with_gates["item_file"]
+
+        # Rewrite item without assignee
+        item_file.write_text(
+            """---
+id: EXP-300
+title: "V1 Gate Test"
+type: expedition
+status: backlog
+---
+# V1 Gate Test
+"""
+        )
+        service._items.clear()
+
+        with pytest.raises(ValueError, match="Assignee required"):
+            service.move_item(
+                "EXP-300",
+                WorkItemStatus.IN_PROGRESS,
+                commit=False,
+                validate_workflow=False,
+            )
+
+    def test_v1_gates_pass_when_satisfied(self, kanban_v1_with_gates):
+        """v1 single-board config gates pass when conditions met."""
+        service = kanban_v1_with_gates["service"]
+
+        # EXP-300 has assignee=Mini, should pass require_assignee gate
+        item = service.move_item(
+            "EXP-300",
+            WorkItemStatus.IN_PROGRESS,
+            commit=False,
+            validate_workflow=False,
+        )
+        assert item.status == WorkItemStatus.IN_PROGRESS
+
+    def test_no_gates_skip_gates_no_audit_trail(self, kanban_no_gates):
+        """skip_gates=True with no gates configured does NOT write kb:gatesSkipped."""
+        service = kanban_no_gates["service"]
+        item_file = kanban_no_gates["item_file"]
+
+        service.move_item(
+            "EXP-200",
+            WorkItemStatus.IN_PROGRESS,
+            commit=False,
+            validate_workflow=False,
+            skip_gates=True,
+        )
+
+        content = item_file.read_text()
+        assert "kb:gatesSkipped" not in content
 
     def test_gate_blocked_without_assignee(self, kanban_with_gates):
         """Require_assignee gate blocks when no assignee."""
