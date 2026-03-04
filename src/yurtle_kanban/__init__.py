@@ -35,6 +35,7 @@ except ImportError as e:
     ) from e
 
 from yurtle_kanban.config import KanbanConfig
+from yurtle_kanban.gates import GateDefinition, GateEvaluator, GateResult
 from yurtle_kanban.hooks import HookContext, HookEngine, HookEvent
 from yurtle_kanban.models import (
     Board,
@@ -56,6 +57,10 @@ from yurtle_kanban.workflow import (
 __all__ = [
     # Config
     "KanbanConfig",
+    # Gates
+    "GateDefinition",
+    "GateEvaluator",
+    "GateResult",
     # Hooks
     "HookContext",
     "HookEngine",
