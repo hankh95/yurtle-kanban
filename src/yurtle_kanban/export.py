@@ -714,7 +714,7 @@ def _research_row(item: WorkItem, type_key: str, status_emoji: str) -> list[str]
         venue = item.metadata.get("venue", "-")
         assignee = item.assignee or "-"
         pri = (item.priority or "-")[:4].upper()
-        return [str(id_num), title, status_emoji, pri, str(venue)[:15], assignee]
+        return [str(id_num), title, status_emoji, pri, str(venue)[:25], assignee]
 
     elif type_key == "hypothesis":
         paper = item.metadata.get("paper", "-")
