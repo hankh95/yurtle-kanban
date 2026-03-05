@@ -1241,6 +1241,165 @@ main.add_command(hypothesis)
 main.add_command(experiment)
 main.add_command(measure)
 
+
+@main.command()
+@click.argument("query_text", required=False)
+@click.option("--sparql", "sparql_query", help="Raw SPARQL SELECT query against the unified graph")
+@click.option("--semantic", "semantic_query", help="Pure semantic search (requires sentence-transformers)")
+@click.option("--top", "-n", "top_k", default=20, help="Max results to return (default: 20)")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+@click.option("--no-semantic", is_flag=True, help="Disable semantic search (graph-only mode)")
+@click.option("--verbose", "-v", is_flag=True, help="Show parsed query decomposition")
+def query(
+    query_text: str | None,
+    sparql_query: str | None,
+    semantic_query: str | None,
+    top_k: int,
+    as_json: bool,
+    no_semantic: bool,
+    verbose: bool,
+):
+    """Query work items using SPARQL, semantic search, or natural language.
+
+    \b
+    Examples:
+      yurtle-kanban query "not-done expeditions above 700 that improve brain"
+      yurtle-kanban query --sparql "SELECT ?id ?title WHERE { ?item kb:id ?id . ?item kb:title ?title . ?item kb:status kb:in_progress . }"
+      yurtle-kanban query --semantic "knowledge graph reasoning"
+      yurtle-kanban query "blocked items" --no-semantic
+    """
+    from .query import EmbeddingIndex, NLDecomposer, QueryEngine, UnifiedGraph
+
+    service = get_service()
+
+    if sparql_query:
+        # Raw SPARQL mode
+        ug = UnifiedGraph.from_service(service)
+        try:
+            results = ug.sparql(sparql_query)
+        except Exception as e:
+            console.print(f"[red]SPARQL error:[/red] {e}")
+            sys.exit(1)
+
+        if as_json:
+            click.echo(json.dumps(results, indent=2))
+        else:
+            if not results:
+                console.print("[dim]No results.[/dim]")
+                return
+            # Print as table
+            from rich.table import Table
+            headers = list(results[0].keys())
+            table = Table(title="SPARQL Results")
+            for h in headers:
+                table.add_column(h)
+            for row in results[:top_k]:
+                table.add_row(*[row.get(h, "") for h in headers])
+            console.print(table)
+        return
+
+    if semantic_query:
+        # Pure semantic mode
+        try:
+            emb = EmbeddingIndex.from_service(service)
+        except ImportError as e:
+            console.print(f"[red]{e}[/red]")
+            sys.exit(1)
+
+        hits = emb.search(semantic_query, top_k=top_k)
+        if as_json:
+            click.echo(json.dumps(
+                [{"id": h.item_id, "score": round(h.score, 4), "title": h.item.title if h.item else ""} for h in hits],
+                indent=2,
+            ))
+        else:
+            from rich.table import Table
+            table = Table(title=f"Semantic Search: \"{semantic_query}\"")
+            table.add_column("ID", style="cyan")
+            table.add_column("Score", justify="right")
+            table.add_column("Status")
+            table.add_column("Title")
+            for hit in hits:
+                title = hit.item.title if hit.item else ""
+                status = hit.item.status.value if hit.item else ""
+                table.add_row(hit.item_id, f"{hit.score:.4f}", status, title)
+            console.print(table)
+        return
+
+    if not query_text:
+        console.print("[red]Provide a query string, --sparql, or --semantic.[/red]")
+        console.print("[dim]Example: yurtle-kanban query \"not-done expeditions that improve brain\"[/dim]")
+        sys.exit(1)
+
+    # Hybrid NL query
+    enable_semantic = not no_semantic
+    try:
+        engine = QueryEngine.from_service(service, enable_semantic=enable_semantic)
+    except ImportError:
+        # Fall back to graph-only if sentence-transformers not installed
+        engine = QueryEngine.from_service(service, enable_semantic=False)
+        if enable_semantic:
+            console.print("[dim]sentence-transformers not installed; using graph-only mode[/dim]")
+
+    if verbose:
+        decomposer = NLDecomposer()
+        parsed = decomposer.parse(query_text)
+        console.print("[bold]Parsed query:[/bold]")
+        if parsed.status_filter:
+            console.print(f"  Status exclude: {parsed.status_filter}")
+        if parsed.status_include:
+            console.print(f"  Status include: {parsed.status_include}")
+        if parsed.type_filter:
+            console.print(f"  Type: {parsed.type_filter}")
+        if parsed.id_min is not None:
+            console.print(f"  ID min: {parsed.id_min}")
+        if parsed.id_max is not None:
+            console.print(f"  ID max: {parsed.id_max}")
+        if parsed.assignee:
+            console.print(f"  Assignee: {parsed.assignee}")
+        if parsed.tag:
+            console.print(f"  Tag: {parsed.tag}")
+        if parsed.semantic_query:
+            console.print(f"  Semantic: \"{parsed.semantic_query}\"")
+        console.print()
+
+    results = engine.query(query_text, top_k=top_k)
+
+    if not results:
+        console.print("[dim]No results.[/dim]")
+        return
+
+    if as_json:
+        click.echo(json.dumps(
+            [{
+                "id": r.item.id,
+                "title": r.item.title,
+                "status": r.item.status.value,
+                "priority": r.item.priority,
+                "semantic_score": round(r.semantic_score, 4) if r.semantic_score else None,
+                "combined_score": round(r.combined_score, 4),
+            } for r in results],
+            indent=2,
+        ))
+    else:
+        from rich.table import Table
+        has_semantic = any(r.semantic_score > 0 for r in results)
+        table = Table(title=f"Query: \"{query_text}\"")
+        table.add_column("ID", style="cyan")
+        table.add_column("Status")
+        table.add_column("Priority")
+        if has_semantic:
+            table.add_column("Score", justify="right")
+        table.add_column("Title")
+
+        for r in results:
+            row = [r.item.id, r.item.status.value, r.item.priority or ""]
+            if has_semantic:
+                row.append(f"{r.combined_score:.3f}")
+            row.append(r.item.title)
+            table.add_row(*row)
+        console.print(table)
+
 # Epic subgroups (epic is primary, voyage is nautical alias)
 main.add_command(epic)
 main.add_command(voyage)
