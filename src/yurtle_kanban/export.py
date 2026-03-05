@@ -592,3 +592,147 @@ def export_json(board: Board) -> str:
     }
 
     return json.dumps(data, indent=2)
+
+
+# Status emoji for research items
+_RESEARCH_STATUS_EMOJI = {
+    "complete": "\u2705",     # ✅
+    "done": "\u2705",         # ✅
+    "active": "\U0001F4DD",   # 📝
+    "draft": "\U0001F4DD",    # 📝
+    "writing": "\u270D\uFE0F",  # ✍️
+    "running": "\U0001F3C3",  # 🏃
+    "planned": "\U0001F4CB",  # 📋
+    "abandoned": "\u274C",    # ❌
+    "captured": "\U0001F4A1", # 💡
+    "validated": "\u2705",    # ✅
+    "rejected": "\u274C",     # ❌
+    "preliminary": "\U0001F50D",  # 🔍
+}
+
+
+def export_research_index(board: Board) -> str:
+    """Export a research board index grouped by item type.
+
+    Groups items into sections: Papers, Hypotheses, Experiments, Measures, Ideas,
+    Literature. Each section has a table with type-appropriate columns.
+
+    Args:
+        board: The research board with all items
+
+    Returns:
+        Markdown formatted research index
+    """
+    lines = [
+        "# Research Index",
+        "",
+        f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
+        "",
+    ]
+
+    # Group items by type
+    type_groups: dict[str, list[WorkItem]] = {}
+    for item in board.items:
+        type_key = item.item_type.value
+        type_groups.setdefault(type_key, []).append(item)
+
+    # Section order and display config
+    sections = [
+        ("paper", "Papers", ["#", "Title", "Status", "Pri", "Venue", "Assignee"]),
+        ("hypothesis", "Hypotheses", ["#", "Title", "Status", "Paper"]),
+        ("experiment", "Experiments", ["#", "Title", "Status", "Assignee"]),
+        ("measure", "Measures", ["#", "Title", "Status", "Unit", "Category"]),
+        ("idea", "Ideas", ["#", "Title", "Status", "Pri"]),
+        ("literature", "Literature", ["#", "Title", "Status", "Assignee"]),
+    ]
+
+    total = 0
+
+    for type_key, section_name, columns in sections:
+        items = type_groups.get(type_key, [])
+        if not items:
+            continue
+
+        total += len(items)
+
+        # Sort by ID number
+        items.sort(key=lambda x: _extract_id_number(x.id))
+
+        lines.append(f"## {section_name} ({len(items)})")
+        lines.append("")
+
+        # Table header
+        header = "| " + " | ".join(columns) + " |"
+        separator = "| " + " | ".join("---" for _ in columns) + " |"
+        lines.append(header)
+        lines.append(separator)
+
+        for item in items:
+            # Use original status string for research-specific emoji
+            original_status = item.metadata.get("_original_status", item.status.value)
+            status_emoji = _RESEARCH_STATUS_EMOJI.get(
+                original_status, _status_emoji(item.status)
+            )
+            row = _research_row(item, type_key, status_emoji)
+            lines.append("| " + " | ".join(row) + " |")
+
+        lines.append("")
+
+    # Summary
+    lines.append("## Summary")
+    lines.append("")
+    lines.append("| Type | Count |")
+    lines.append("| --- | --- |")
+    for type_key, section_name, _ in sections:
+        count = len(type_groups.get(type_key, []))
+        if count > 0:
+            lines.append(f"| {section_name} | {count} |")
+    lines.append(f"| **Total** | **{total}** |")
+    lines.append("")
+
+    lines.append(
+        f"**Legend:** "
+        f"\u2705 Complete | "
+        f"\U0001F4DD Draft/Active | "
+        f"\u270D\uFE0F Writing | "
+        f"\U0001F4CB Planned | "
+        f"\U0001F4A1 Captured | "
+        f"\u274C Abandoned"
+    )
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def _research_row(item: WorkItem, type_key: str, status_emoji: str) -> list[str]:
+    """Build a table row for a research item based on its type."""
+    # Extract numeric ID for display
+    id_num = _extract_id_number(item.id) or item.id
+    title = item.title[:60] + ("..." if len(item.title) > 60 else "")
+
+    if type_key == "paper":
+        venue = item.metadata.get("venue", "-")
+        assignee = item.assignee or "-"
+        pri = (item.priority or "-")[:4].upper()
+        return [str(id_num), title, status_emoji, pri, str(venue)[:25], assignee]
+
+    elif type_key == "hypothesis":
+        paper = item.metadata.get("paper", "-")
+        return [str(item.id), title, status_emoji, str(paper)]
+
+    elif type_key == "experiment":
+        assignee = item.assignee or "-"
+        return [str(item.id), title, status_emoji, assignee]
+
+    elif type_key == "measure":
+        unit = item.metadata.get("unit", "-")
+        category = item.metadata.get("category", "-")
+        return [str(item.id), title, status_emoji, str(unit), str(category)]
+
+    elif type_key == "idea":
+        pri = (item.priority or "-")[:4].upper()
+        return [str(item.id), title, status_emoji, pri]
+
+    else:
+        assignee = item.assignee or "-"
+        return [str(item.id), title, status_emoji, assignee]

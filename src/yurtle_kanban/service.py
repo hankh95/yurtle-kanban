@@ -268,6 +268,20 @@ class KanbanService:
 
             compute_requirement = frontmatter.get("compute_requirement")
 
+            # Collect remaining frontmatter keys into metadata
+            _parsed_keys = {
+                "id", "title", "type", "status", "priority", "assignee",
+                "created", "tags", "depends_on", "related", "resolution",
+                "superseded_by", "priority_rank", "value_summary",
+                "compute_requirement",
+            }
+            metadata = {
+                k: v for k, v in frontmatter.items()
+                if k not in _parsed_keys and v is not None
+            }
+            # Preserve original status string for theme-aware rendering
+            metadata["_original_status"] = status_str
+
             # Parse RDF graph from frontmatter + fenced blocks
             graph = self._parse_graph(content)
 
@@ -284,6 +298,7 @@ class KanbanService:
                 depends_on=depends_on,
                 related=related,
                 description=description,
+                metadata=metadata,
                 resolution=resolution,
                 superseded_by=superseded_by,
                 graph=graph,
