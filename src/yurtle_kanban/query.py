@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rdflib import RDF, Graph, Literal, Namespace, URIRef
+from rdflib import RDF, Graph, Literal, Namespace
 from rdflib.namespace import XSD
 
 from .models import WorkItem
@@ -84,7 +84,8 @@ class UnifiedGraph:
         if item.assignee:
             self._graph.add((item_uri, KB.assignee, Literal(item.assignee)))
         if item.created:
-            self._graph.add((item_uri, KB.created, Literal(item.created.isoformat(), datatype=XSD.date)))
+            created_lit = Literal(item.created.isoformat(), datatype=XSD.date)
+            self._graph.add((item_uri, KB.created, created_lit))
         if item.description:
             self._graph.add((item_uri, KB.description, Literal(item.description)))
 
@@ -104,7 +105,8 @@ class UnifiedGraph:
 
         # Extended metadata
         if item.priority_rank is not None:
-            self._graph.add((item_uri, KB.priorityRank, Literal(item.priority_rank, datatype=XSD.integer)))
+            rank_lit = Literal(item.priority_rank, datatype=XSD.integer)
+            self._graph.add((item_uri, KB.priorityRank, rank_lit))
         if item.compute_requirement:
             self._graph.add((item_uri, KB.computeRequirement, Literal(item.compute_requirement)))
 
@@ -206,8 +208,6 @@ class EmbeddingIndex:
             self.add_item(item)
 
     def _ensure_embeddings(self):
-        import numpy as np
-
         if self._embeddings is not None:
             return
 
@@ -360,8 +360,14 @@ class NLDecomposer:
     }
 
     # ID range patterns
-    _ID_ABOVE = re.compile(r"(?:\b(?:above|over|greater than|after)\s+|(?<!\w)[>=]+\s*)(\d+)\b", re.IGNORECASE)
-    _ID_BELOW = re.compile(r"(?:\b(?:below|under|less than|before)\s+|(?<!\w)[<=]+\s*)(\d+)\b", re.IGNORECASE)
+    _ID_ABOVE = re.compile(
+        r"(?:\b(?:above|over|greater than|after)\s+|(?<!\w)[>=]+\s*)(\d+)\b",
+        re.IGNORECASE,
+    )
+    _ID_BELOW = re.compile(
+        r"(?:\b(?:below|under|less than|before)\s+|(?<!\w)[<=]+\s*)(\d+)\b",
+        re.IGNORECASE,
+    )
     _ID_BETWEEN = re.compile(r"\bbetween\s*(\d+)\s*(?:and|to|-)\s*(\d+)\b", re.IGNORECASE)
 
     # Assignee
@@ -430,7 +436,10 @@ class NLDecomposer:
         # Clean up remaining as semantic query
         remaining = re.sub(r"\s+", " ", remaining).strip()
         # Remove leading/trailing connectors
-        remaining = re.sub(r"^(?:that|which|who|and|or|the|a|an|all|show|find|list|get)\s+", "", remaining, flags=re.IGNORECASE)
+        remaining = re.sub(
+            r"^(?:that|which|who|and|or|the|a|an|all|show|find|list|get)\s+",
+            "", remaining, flags=re.IGNORECASE,
+        )
         remaining = re.sub(r"\s+(?:that|which)\s*$", "", remaining, flags=re.IGNORECASE)
         parsed.semantic_query = remaining.strip()
 

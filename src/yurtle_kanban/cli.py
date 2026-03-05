@@ -295,7 +295,10 @@ kanban:
 @click.option("--status", "-s", help="Filter by status (backlog, ready, in_progress, review, done)")
 @click.option("--type", "-t", "item_type", help="Filter by type (feature, bug, epic, task)")
 @click.option("--assignee", "-a", help="Filter by assignee")
-@click.option("--priority", "-p", help="Filter by priority (critical, high, medium, low). Comma-separated for multiple.")
+@click.option(
+    "--priority", "-p",
+    help="Filter by priority (critical, high, medium, low). Comma-separated.",
+)
 @click.option("--board", "-b", "board_name", help="Filter to a specific board (multi-board mode)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def list_items(
@@ -332,7 +335,10 @@ def list_items(
         priority_filter = [p.strip().lower() for p in priority.split(",")]
         invalid = [p for p in priority_filter if p not in valid_priorities]
         if invalid:
-            console.print(f"[red]Unknown priority: {', '.join(invalid)}. Valid: critical, high, medium, low[/red]")
+            console.print(
+                f"[red]Unknown priority: {', '.join(invalid)}."
+                " Valid: critical, high, medium, low[/red]"
+            )
             sys.exit(1)
 
     items = service.get_items(
@@ -1245,7 +1251,10 @@ main.add_command(measure)
 @main.command()
 @click.argument("query_text", required=False)
 @click.option("--sparql", "sparql_query", help="Raw SPARQL SELECT query against the unified graph")
-@click.option("--semantic", "semantic_query", help="Pure semantic search (requires sentence-transformers)")
+@click.option(
+    "--semantic", "semantic_query",
+    help="Pure semantic search (requires sentence-transformers)",
+)
 @click.option("--top", "-n", "top_k", default=20, help="Max results to return (default: 20)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.option("--no-semantic", is_flag=True, help="Disable semantic search (graph-only mode)")
@@ -1264,7 +1273,7 @@ def query(
     \b
     Examples:
       yurtle-kanban query "not-done expeditions above 700 that improve brain"
-      yurtle-kanban query --sparql "SELECT ?id ?title WHERE { ?item kb:id ?id . ?item kb:title ?title . ?item kb:status kb:in_progress . }"
+      yurtle-kanban query --sparql "SELECT ?id WHERE { ?item kb:id ?id . }"
       yurtle-kanban query --semantic "knowledge graph reasoning"
       yurtle-kanban query "blocked items" --no-semantic
     """
@@ -1309,7 +1318,14 @@ def query(
         hits = emb.search(semantic_query, top_k=top_k)
         if as_json:
             click.echo(json.dumps(
-                [{"id": h.item_id, "score": round(h.score, 4), "title": h.item.title if h.item else ""} for h in hits],
+                [
+                    {
+                        "id": h.item_id,
+                        "score": round(h.score, 4),
+                        "title": h.item.title if h.item else "",
+                    }
+                    for h in hits
+                ],
                 indent=2,
             ))
         else:
@@ -1328,7 +1344,10 @@ def query(
 
     if not query_text:
         console.print("[red]Provide a query string, --sparql, or --semantic.[/red]")
-        console.print("[dim]Example: yurtle-kanban query \"not-done expeditions that improve brain\"[/dim]")
+        console.print(
+            '[dim]Example: yurtle-kanban query'
+            ' "not-done expeditions that improve brain"[/dim]'
+        )
         sys.exit(1)
 
     # Hybrid NL query

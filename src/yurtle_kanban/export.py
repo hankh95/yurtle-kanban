@@ -204,10 +204,12 @@ def _render_html_card(item: WorkItem) -> str:
     tags_html = " ".join(
         f'<span class="tag">{html_escape(tag)}</span>' for tag in item.tags[:3]
     )
+    type_label = html_escape(item.item_type.value.upper())
+    id_label = html_escape(item.id)
 
     return f"""
     <div class="card priority-{html_escape(item.priority or "medium")}">
-        <div class="card-id">{html_escape(item.item_type.value.upper())} {html_escape(item.id)}</div>
+        <div class="card-id">{type_label} {id_label}</div>
         <div class="card-title">{html_escape(item.title)}</div>
         <div class="card-meta">
             {f"<span>@{html_escape(item.assignee)}</span>" if item.assignee else ""}
