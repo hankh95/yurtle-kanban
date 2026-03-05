@@ -21,7 +21,7 @@ Usage:
     yurtle-kanban-mcp
 """
 
-__version__ = "1.15.0"
+__version__ = "2.0.0"
 
 # yurtle-kanban is a graph-native product — rdflib + yurtle-rdflib are required.
 # Register the yurtle_rdflib plugin before any Graph.parse(format="yurtle") calls.
@@ -45,6 +45,7 @@ from yurtle_kanban.models import (
     WorkItemStatus,
     WorkItemType,
 )
+from yurtle_kanban.query import NLDecomposer, QueryEngine, QueryResult, UnifiedGraph
 from yurtle_kanban.service import KanbanService
 from yurtle_kanban.workflow import (
     StateConfig,
@@ -72,6 +73,11 @@ __all__ = [
     "WorkItem",
     "WorkItemStatus",
     "WorkItemType",
+    # Query Engine
+    "NLDecomposer",
+    "QueryEngine",
+    "QueryResult",
+    "UnifiedGraph",
     # Service
     "KanbanService",
     # Workflow

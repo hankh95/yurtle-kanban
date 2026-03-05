@@ -27,8 +27,14 @@ nusy-nano        ->  Optional: neurosymbolic reasoning
 ```bash
 pip install yurtle-kanban
 
+# With semantic search (sentence-transformers)
+pip install yurtle-kanban[search]
+
 # With MCP server support
 pip install yurtle-kanban[mcp]
+
+# Everything (search + LLM + MCP)
+pip install yurtle-kanban[all]
 ```
 
 ## Quick Start
@@ -623,6 +629,39 @@ jobs:
 | PR integration | Work item changes visible in pull requests |
 
 ## Changelog
+
+### v2.0.0 (2026-03-05)
+
+**Queryable knowledge graph — SPARQL, semantic search, and hybrid NL queries.**
+
+The jump from file-based kanban CLI (1.x) to a queryable knowledge graph with
+semantic search. Every work item was already an RDF node — 2.0 connects them
+into a single queryable whole.
+
+#### Added
+- **`query` command** — Three modes: raw SPARQL, pure semantic search, and hybrid natural language queries (#54)
+- **Unified RDF Graph** — Merges all per-file `WorkItem.graph` instances into a single `rdflib.Graph`, materializes YAML frontmatter as queryable RDF triples (status, tags, assignee, numeric ID, dependencies, priority rank)
+- **NL Decomposer** — Rule-based extraction of structured filters (status, type, ID range, assignee, tag) from natural language; remainder drives semantic ranking
+- **Embedding Index** — Semantic search using `sentence-transformers` with hash-based disk cache in `.yurtle-kanban/embeddings/`
+- **Hybrid Ranker** — SPARQL narrows candidates, embeddings rank by cosine similarity to semantic intent
+- **Optional dependency groups** — `pip install yurtle-kanban[search]` for embeddings, `[llm]` for Claude API (future), `[all]` for everything
+- **Python API** — `QueryEngine`, `UnifiedGraph`, `EmbeddingIndex`, `NLDecomposer` all importable from `yurtle_kanban`
+- **Full query documentation** — [docs/query.md](docs/query.md) with predicate reference, SPARQL examples, architecture diagram, and Python API guide
+
+#### Example
+```bash
+yurtle-kanban query "not-done expeditions above 700 that improve brain functioning"
+# Decomposes into: status != done, type = expedition, numericId > 700
+# Then ranks remaining items by semantic similarity to "improve brain functioning"
+```
+
+### v1.15.0 (2026-03-04)
+
+**Config-driven transition gates, priority filter on list.**
+
+#### Added
+- **Config-driven transition gates** for the `move` command (#53)
+- **`--priority` filter** on the `list` command (#52)
 
 ### v1.14.0 (2026-03-03)
 
