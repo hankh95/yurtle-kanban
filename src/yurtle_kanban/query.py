@@ -58,6 +58,10 @@ class UnifiedGraph:
     def graph(self) -> Graph:
         return self._graph
 
+    @property
+    def items(self) -> dict[str, WorkItem]:
+        return self._items
+
     def __len__(self) -> int:
         return len(self._graph)
 
@@ -121,7 +125,10 @@ class UnifiedGraph:
         """Execute a SPARQL SELECT query and return results as list of dicts."""
         results = []
         for row in self._graph.query(query):
-            results.append({str(var): str(val) for var, val in zip(row.labels, row)})
+            results.append({
+                str(var): str(val) if val is not None else ""
+                for var, val in zip(row.labels, row)
+            })
         return results
 
     def sparql_raw(self, query: str):
@@ -277,6 +284,8 @@ class EmbeddingIndex:
     @classmethod
     def from_service(cls, service: KanbanService, cache_dir: Path | None = None) -> EmbeddingIndex:
         """Build an embedding index from all items in a KanbanService."""
+        if cache_dir is None:
+            cache_dir = service.repo_root / ".yurtle-kanban" / "embeddings"
         idx = cls(cache_dir=cache_dir)
         items = service.scan()
         idx.add_items(items)
@@ -351,8 +360,8 @@ class NLDecomposer:
     }
 
     # ID range patterns
-    _ID_ABOVE = re.compile(r"\b(?:above|over|greater than|>=?|after)\s*(\d+)\b", re.IGNORECASE)
-    _ID_BELOW = re.compile(r"\b(?:below|under|less than|<=?|before)\s*(\d+)\b", re.IGNORECASE)
+    _ID_ABOVE = re.compile(r"(?:\b(?:above|over|greater than|after)\s+|(?<!\w)[>=]+\s*)(\d+)\b", re.IGNORECASE)
+    _ID_BELOW = re.compile(r"(?:\b(?:below|under|less than|before)\s+|(?<!\w)[<=]+\s*)(\d+)\b", re.IGNORECASE)
     _ID_BETWEEN = re.compile(r"\bbetween\s*(\d+)\s*(?:and|to|-)\s*(\d+)\b", re.IGNORECASE)
 
     # Assignee
@@ -392,8 +401,9 @@ class NLDecomposer:
         # ID ranges
         m = self._ID_BETWEEN.search(remaining)
         if m:
-            parsed.id_min = int(m.group(1))
-            parsed.id_max = int(m.group(2))
+            a, b = int(m.group(1)), int(m.group(2))
+            parsed.id_min = min(a, b)
+            parsed.id_max = max(a, b)
             remaining = self._ID_BETWEEN.sub("", remaining)
         else:
             m = self._ID_ABOVE.search(remaining)
@@ -538,7 +548,7 @@ class QueryEngine:
             graph_items = self.structured_query(parsed)
         else:
             # No structured constraints — all items are candidates
-            graph_items = list(self._ug._items.values())
+            graph_items = list(self._ug.items.values())
 
         # If no semantic component or no embedding index, return graph results
         if not parsed.has_semantic or self._emb is None:
@@ -553,7 +563,6 @@ class QueryEngine:
 
         # Combine: items must pass graph filter, ranked by semantic score
         results = []
-        graph_ids = {item.id for item in graph_items}
         for item in graph_items:
             sem_score = score_map.get(item.id, 0.0)
             combined = self._alpha * 1.0 + (1 - self._alpha) * sem_score
@@ -594,7 +603,7 @@ class QueryEngine:
                 if cache_dir is None:
                     cache_dir = service.repo_root / ".yurtle-kanban" / "embeddings"
                 emb = EmbeddingIndex(cache_dir=cache_dir)
-                emb.add_items(list(ug._items.values()))
+                emb.add_items(list(ug.items.values()))
             except ImportError:
                 logger.info("sentence-transformers not installed; semantic search disabled")
 

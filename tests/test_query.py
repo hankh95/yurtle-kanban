@@ -201,6 +201,54 @@ class TestUnifiedGraph:
         assert "EXP-900" in ids
         assert "EXP-950" not in ids  # tagged ios, carplay
 
+    def test_sparql_optional_none_not_stringified(self, unified_graph):
+        """OPTIONAL bindings should return empty string, not 'None'."""
+        results = unified_graph.sparql(
+            "PREFIX kb: <https://yurtle.dev/kanban/> "
+            "SELECT ?id ?assignee WHERE { "
+            "  ?item kb:id ?id . "
+            "  OPTIONAL { ?item kb:assignee ?assignee . } "
+            "  ?item kb:status kb:backlog . "
+            "}"
+        )
+        # EXP-950 is backlog with no assignee
+        for r in results:
+            if r["id"] == "EXP-950":
+                assert r["assignee"] != "None", "None should not be stringified"
+                assert r["assignee"] == ""
+                break
+
+    def test_items_property(self, unified_graph):
+        """Public items property exposes WorkItem dict."""
+        assert "EXP-800" in unified_graph.items
+        assert unified_graph.items["EXP-800"].title == "Fix daemon graph search"
+
+    def test_per_file_graph_merge(self):
+        """Per-file RDF triples from WorkItem.graph are merged into unified graph."""
+        from rdflib import Graph as RDFGraph, Literal, URIRef
+
+        # Create item with a custom RDF graph (simulating yurtle fenced block)
+        custom_graph = RDFGraph()
+        custom_graph.add((
+            URIRef("https://example.org/custom"),
+            URIRef("https://example.org/pred"),
+            Literal("custom_value"),
+        ))
+        item = _make_item("EXP-999", "Item with custom RDF")
+        item.graph = custom_graph
+
+        ug = UnifiedGraph()
+        ug.add_item(item)
+
+        # Custom triple should be queryable
+        results = list(ug.graph.triples((
+            URIRef("https://example.org/custom"),
+            URIRef("https://example.org/pred"),
+            None,
+        )))
+        assert len(results) == 1
+        assert str(results[0][2]) == "custom_value"
+
     def test_from_service_returns_populated_graph(self, sample_items):
         """Test that from_service pattern works (without real service)."""
         ug = UnifiedGraph()
@@ -286,6 +334,22 @@ class TestNLDecomposer:
     def test_has_semantic(self, decomposer):
         parsed = decomposer.parse("improve brain functioning")
         assert parsed.has_semantic
+
+    def test_id_above_boundary(self, decomposer):
+        """'above 700' means > 700, not >= 700."""
+        parsed = decomposer.parse("above 700")
+        assert parsed.id_min == 700  # stored as 700, SPARQL uses > (strict)
+
+    def test_inverted_between_swaps(self, decomposer):
+        """'between 900 and 200' should swap to min=200, max=900."""
+        parsed = decomposer.parse("between 900 and 200")
+        assert parsed.id_min == 200
+        assert parsed.id_max == 900
+
+    def test_gt_symbol_parses(self, decomposer):
+        """'>= 500' should parse as id_min."""
+        parsed = decomposer.parse(">= 500")
+        assert parsed.id_min == 500
 
     def test_complex_query(self, decomposer):
         """The original query that motivated EXP-1090."""
