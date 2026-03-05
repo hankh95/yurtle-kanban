@@ -36,7 +36,7 @@ from .board import (
 )
 from .config import KanbanConfig
 from .epic_commands import epic, voyage
-from .export import export_expedition_index, export_html, export_json, export_markdown
+from .export import export_expedition_index, export_html, export_json, export_markdown, export_research_index
 from .hdd_commands import experiment, hdd, hypothesis, idea, literature, measure, paper
 from .models import WorkItemStatus, WorkItemType
 from .service import KanbanService
@@ -1047,12 +1047,13 @@ def metrics(item_id: str | None, as_json: bool):
     "-f",
     "fmt",
     required=True,
-    type=click.Choice(["html", "markdown", "json", "expedition-index"]),
+    type=click.Choice(["html", "markdown", "json", "expedition-index", "research-index"]),
     help="Export format",
 )
 @click.option("--output", "-o", help="Output file (default: stdout)")
 @click.option("--min-id", default=600, help="Minimum ID for Work Trail (expedition-index only)")
-def export_cmd(fmt: str, output: str | None, min_id: int):
+@click.option("--board", "-b", "board_name", help="Board to export (multi-board mode)")
+def export_cmd(fmt: str, output: str | None, min_id: int, board_name: str | None):
     """Export the board to various formats.
 
     Formats:
@@ -1060,9 +1061,10 @@ def export_cmd(fmt: str, output: str | None, min_id: int):
     - markdown: Simple markdown table
     - json: JSON for integrations
     - expedition-index: Enhanced index with Work Trail and Dependency Tree
+    - research-index: Research board index grouped by type (papers, hypotheses, etc.)
     """
     service = get_service()
-    board = service.get_board()
+    board = service.get_board(board_name)
 
     if fmt == "html":
         content = export_html(board)
@@ -1072,6 +1074,8 @@ def export_cmd(fmt: str, output: str | None, min_id: int):
         content = export_json(board)
     elif fmt == "expedition-index":
         content = export_expedition_index(board, min_id=min_id)
+    elif fmt == "research-index":
+        content = export_research_index(board)
     else:
         console.print(f"[red]Unknown format: {fmt}[/red]")
         sys.exit(1)
