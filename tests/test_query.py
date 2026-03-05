@@ -16,11 +16,14 @@ from yurtle_kanban.models import WorkItem, WorkItemStatus, WorkItemType
 from yurtle_kanban.query import NLDecomposer, QueryEngine, UnifiedGraph
 
 try:
+    import numpy  # noqa: F401
+    from sentence_transformers import SentenceTransformer  # noqa: F401
+
     from yurtle_kanban.query import EmbeddingIndex
 
-    HAS_SENTENCE_TRANSFORMERS = True
+    HAS_SEARCH_DEPS = True
 except ImportError:
-    HAS_SENTENCE_TRANSFORMERS = False
+    HAS_SEARCH_DEPS = False
 
 
 # ---------------------------------------------------------------------------
@@ -59,23 +62,45 @@ def _make_item(
 @pytest.fixture
 def sample_items() -> list[WorkItem]:
     return [
-        _make_item("EXP-700", "Y0/Y1 Chunk Graph Storage", WorkItemStatus.REVIEW, tags=["brain", "graph"]),
-        _make_item("EXP-750", "Vision for Beings — Multimodal Visual Learning", WorkItemStatus.BLOCKED, tags=["multimodal"]),
-        _make_item("EXP-800", "Fix daemon graph search", WorkItemStatus.IN_PROGRESS, assignee="DGX", tags=["brain", "chat"]),
-        _make_item("EXP-850", "Wire Y4/Y6 into daemon chat", WorkItemStatus.IN_PROGRESS, assignee="Mini", tags=["brain", "y-layer"]),
-        _make_item("EXP-900", "Graph Verbalization Pipeline", WorkItemStatus.DONE, tags=["brain", "graph"]),
-        _make_item("EXP-950", "CarClaw: CarPlay Voice Agent", WorkItemStatus.BACKLOG, tags=["ios", "carplay"]),
-        _make_item("EXP-1000", "First LoRA Fine-Tune", WorkItemStatus.BACKLOG, tags=["training", "lora"], description="Fine-tune Nemotron on Santiago knowledge graph"),
+        _make_item(
+            "EXP-700", "Y0/Y1 Chunk Graph Storage",
+            WorkItemStatus.REVIEW, tags=["brain", "graph"],
+        ),
+        _make_item(
+            "EXP-750", "Vision for Beings — Multimodal Visual Learning",
+            WorkItemStatus.BLOCKED, tags=["multimodal"],
+        ),
+        _make_item(
+            "EXP-800", "Fix daemon graph search",
+            WorkItemStatus.IN_PROGRESS, assignee="DGX",
+            tags=["brain", "chat"],
+        ),
+        _make_item(
+            "EXP-850", "Wire Y4/Y6 into daemon chat",
+            WorkItemStatus.IN_PROGRESS, assignee="Mini",
+            tags=["brain", "y-layer"],
+        ),
+        _make_item(
+            "EXP-900", "Graph Verbalization Pipeline",
+            WorkItemStatus.DONE, tags=["brain", "graph"],
+        ),
+        _make_item(
+            "EXP-950", "CarClaw: CarPlay Voice Agent",
+            WorkItemStatus.BACKLOG, tags=["ios", "carplay"],
+        ),
+        _make_item(
+            "EXP-1000", "First LoRA Fine-Tune",
+            WorkItemStatus.BACKLOG, tags=["training", "lora"],
+            description="Fine-tune Nemotron on Santiago graph",
+        ),
         _make_item(
             "CHORE-050", "Clean up stale branches",
-            WorkItemStatus.DONE,
-            item_type=WorkItemType.CHORE,
+            WorkItemStatus.DONE, item_type=WorkItemType.CHORE,
             tags=["maintenance"],
         ),
         _make_item(
             "EXP-600", "Old expedition below 700",
-            WorkItemStatus.BACKLOG,
-            description="Legacy work item",
+            WorkItemStatus.BACKLOG, description="Legacy work item",
         ),
     ]
 
@@ -225,7 +250,8 @@ class TestUnifiedGraph:
 
     def test_per_file_graph_merge(self):
         """Per-file RDF triples from WorkItem.graph are merged into unified graph."""
-        from rdflib import Graph as RDFGraph, Literal, URIRef
+        from rdflib import Graph as RDFGraph
+        from rdflib import Literal, URIRef
 
         # Create item with a custom RDF graph (simulating yurtle fenced block)
         custom_graph = RDFGraph()
@@ -320,12 +346,14 @@ class TestNLDecomposer:
         assert "done" in parsed.status_filter
         assert "expedition" in parsed.type_filter
         assert parsed.id_min == 700
-        assert "brain functioning" in parsed.semantic_query.lower() or "improve brain" in parsed.semantic_query.lower()
+        sq = parsed.semantic_query.lower()
+        assert "brain functioning" in sq or "improve brain" in sq
 
     def test_parse_pure_semantic(self, decomposer):
         parsed = decomposer.parse("knowledge graph reasoning improvements")
         assert not parsed.has_structured or parsed.semantic_query
-        assert "knowledge graph" in parsed.semantic_query.lower() or "reasoning" in parsed.semantic_query.lower()
+        sq = parsed.semantic_query.lower()
+        assert "knowledge graph" in sq or "reasoning" in sq
 
     def test_has_structured(self, decomposer):
         parsed = decomposer.parse("not done expeditions")
@@ -415,7 +443,7 @@ class TestQueryEngineGraphOnly:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not HAS_SENTENCE_TRANSFORMERS, reason="sentence-transformers not installed")
+@pytest.mark.skipif(not HAS_SEARCH_DEPS, reason="sentence-transformers or numpy not installed")
 class TestEmbeddingIndex:
     def test_search_returns_results(self, sample_items):
         idx = EmbeddingIndex()
@@ -453,7 +481,7 @@ class TestEmbeddingIndex:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not HAS_SENTENCE_TRANSFORMERS, reason="sentence-transformers not installed")
+@pytest.mark.skipif(not HAS_SEARCH_DEPS, reason="sentence-transformers or numpy not installed")
 class TestQueryEngineHybrid:
     @pytest.fixture
     def engine(self, sample_items):
