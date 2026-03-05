@@ -278,39 +278,50 @@ def export_markdown(board: Board) -> str:
 
 
 def export_expedition_index(board: Board, min_id: int = 600) -> str:
-    """Export an enhanced expedition index with Work Trail and Dependency Tree.
+    """Export an enhanced development board index with all item types.
 
     Features:
-    - Enhanced table with Agent, Depends, For columns
+    - Expeditions table with Agent, Depends, For columns
+    - Chores and Voyages tables
     - Work Trail (items >= min_id) with dependency hierarchy
     - Dependency Tree for active development items
+    - Summary counts by type
 
     Args:
         board: The kanban board with all items
         min_id: Minimum item number for Work Trail section (default: 600)
 
     Returns:
-        Markdown formatted expedition index
+        Markdown formatted development board index
     """
     lines = [
-        "# Expedition Index",
+        "# Development Board",
         "",
         f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
         "",
     ]
 
-    # Filter to expedition-type items and sort by ID
+    # Group items by type
     expeditions = [
         item for item in board.items if item.item_type.value in ("expedition", "feature", "epic")
     ]
     expeditions.sort(key=lambda x: _extract_id_number(x.id), reverse=True)
 
+    chores = [item for item in board.items if item.item_type.value == "chore"]
+    chores.sort(key=lambda x: _extract_id_number(x.id), reverse=True)
+
+    voyages = [item for item in board.items if item.item_type.value == "voyage"]
+    voyages.sort(key=lambda x: _extract_id_number(x.id), reverse=True)
+
+    signals = [item for item in board.items if item.item_type.value == "signal"]
+    signals.sort(key=lambda x: _extract_id_number(x.id), reverse=True)
+
     # =========================================================================
-    # Section 1: Enhanced Expeditions Table
+    # Section 1: Expeditions
     # =========================================================================
     lines.extend(
         [
-            "## Expeditions",
+            f"## Expeditions ({len(expeditions)})",
             "",
             "| # | Title | Status | Pri | Agent | Depends | For |",
             "|---|-------|--------|-----|-------|---------|-----|",
@@ -330,9 +341,80 @@ def export_expedition_index(board: Board, min_id: int = 600) -> str:
             f"| {num} | {title} | {status} | {priority} | {agent} | {depends} | {purpose} |"
         )
 
+    lines.append("")
+
+    # =========================================================================
+    # Section 2: Voyages
+    # =========================================================================
+    if voyages:
+        lines.extend(
+            [
+                f"## Voyages ({len(voyages)})",
+                "",
+                "| # | Title | Status | Pri | Items |",
+                "|---|-------|--------|-----|-------|",
+            ]
+        )
+
+        for item in voyages:
+            num = _extract_id_number(item.id)
+            title = item.title[:55] + "..." if len(item.title) > 55 else item.title
+            status = _status_emoji(item.status)
+            priority = str(item.priority or "medium").upper()[:4]
+            related_count = len(item.related) if item.related else "-"
+
+            lines.append(f"| {num} | {title} | {status} | {priority} | {related_count} |")
+
+        lines.append("")
+
+    # =========================================================================
+    # Section 3: Chores
+    # =========================================================================
+    if chores:
+        lines.extend(
+            [
+                f"## Chores ({len(chores)})",
+                "",
+                "| # | Title | Status | Pri |",
+                "|---|-------|--------|-----|",
+            ]
+        )
+
+        for item in chores:
+            num = _extract_id_number(item.id)
+            title = item.title[:60] + "..." if len(item.title) > 60 else item.title
+            status = _status_emoji(item.status)
+            priority = str(item.priority or "medium").upper()[:4]
+
+            lines.append(f"| {num} | {title} | {status} | {priority} |")
+
+        lines.append("")
+
+    # =========================================================================
+    # Section 4: Signals
+    # =========================================================================
+    if signals:
+        lines.extend(
+            [
+                f"## Signals ({len(signals)})",
+                "",
+                "| # | Title | Status | Pri |",
+                "|---|-------|--------|-----|",
+            ]
+        )
+
+        for item in signals:
+            num = _extract_id_number(item.id)
+            title = item.title[:60] + "..." if len(item.title) > 60 else item.title
+            status = _status_emoji(item.status)
+            priority = str(item.priority or "medium").upper()[:4]
+
+            lines.append(f"| {num} | {title} | {status} | {priority} |")
+
+        lines.append("")
+
     lines.extend(
         [
-            "",
             "**Legend:** 🔄 Active | 🟢 Ready | 🟡 Blocked/Harbor | ✅ Done | ❌ Stranded",
             "",
         ]
@@ -428,6 +510,31 @@ def export_expedition_index(board: Board, min_id: int = 600) -> str:
                 "",
             ]
         )
+
+    # =========================================================================
+    # Section 6: Summary
+    # =========================================================================
+    type_counts = [
+        ("Expeditions", len(expeditions)),
+        ("Voyages", len(voyages)),
+        ("Chores", len(chores)),
+        ("Signals", len(signals)),
+    ]
+    total = sum(c for _, c in type_counts)
+
+    lines.extend(
+        [
+            "## Summary",
+            "",
+            "| Type | Count |",
+            "| --- | --- |",
+        ]
+    )
+    for name, count in type_counts:
+        if count > 0:
+            lines.append(f"| {name} | {count} |")
+    lines.append(f"| **Total** | **{total}** |")
+    lines.append("")
 
     return "\n".join(lines)
 
