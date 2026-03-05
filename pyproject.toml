@@ -52,6 +52,16 @@ dev = [
 mcp = [
     "mcp>=0.1.0",
 ]
+search = [
+    "sentence-transformers>=2.2.0",
+    "numpy>=1.24.0",
+]
+llm = [
+    "anthropic>=0.25.0",
+]
+all = [
+    "yurtle-kanban[search,llm,mcp]",
+]
 
 [project.scripts]
 yurtle-kanban = "yurtle_kanban.cli:main"
