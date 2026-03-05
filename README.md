@@ -97,6 +97,7 @@ yurtle-kanban export --format json
 | `blocked` | List blocked items |
 | `comment` | Add comment to item |
 | `export` | Export board to HTML/Markdown/JSON |
+| `query` | **Hybrid search: SPARQL, semantic, or natural language** |
 | `validate` | Check for ID mismatches and duplicates |
 | `voyage/epic` | Campaign management: `create`, `show`, `add` |
 | `idea` | HDD: Create research/feature ideas |
@@ -132,6 +133,36 @@ Both commands:
 2. Scan files (frontmatter + filenames + `_ID_ALLOCATIONS.json`) for highest ID
 3. Commit and push to claim the ID
 4. Retry with rebase if another agent pushed first
+
+## Querying Your Board
+
+yurtle-kanban builds an RDF knowledge graph from all your work items. You can query it three ways:
+
+```bash
+# Natural language (hybrid: graph filter + semantic ranking)
+yurtle-kanban query "not-done expeditions above 700 that improve brain functioning"
+
+# Raw SPARQL against the unified graph
+yurtle-kanban query --sparql "SELECT ?id ?title WHERE {
+  ?item kb:id ?id . ?item kb:title ?title .
+  ?item kb:status kb:in_progress .
+}"
+
+# Pure semantic search (requires sentence-transformers)
+yurtle-kanban query --semantic "knowledge graph reasoning"
+```
+
+Natural language queries are automatically decomposed into structured filters (status, type, ID range, assignee, tag) plus a semantic intent for ranking. Use `--verbose` to see the decomposition.
+
+**Optional dependencies for search:**
+```bash
+pip install yurtle-kanban[search]   # Adds sentence-transformers for semantic search
+pip install yurtle-kanban[all]      # Everything (search + LLM + MCP)
+```
+
+Without `[search]`, `query` still works in graph-only mode — SPARQL and structured NL filters work with zero extra dependencies.
+
+See [docs/query.md](docs/query.md) for the full query guide.
 
 ## Work Items as Files
 
