@@ -334,7 +334,16 @@ class KanbanService:
         """
         try:
             import yurtle_rdflib
-            doc = yurtle_rdflib.parse_yurtle(content)
+            # Suppress rdflib URI warnings for placeholder URIs like
+            # y3:tool_experience_{hash} that appear in prose/examples (#59).
+            # rdflib uses logging.warning(), not warnings.warn().
+            rdflib_logger = logging.getLogger("rdflib.term")
+            old_level = rdflib_logger.level
+            rdflib_logger.setLevel(logging.ERROR)
+            try:
+                doc = yurtle_rdflib.parse_yurtle(content)
+            finally:
+                rdflib_logger.setLevel(old_level)
             return doc.graph
         except Exception as e:
             logger.debug(f"Failed to parse graph: {e}")

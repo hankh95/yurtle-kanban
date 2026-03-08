@@ -27,6 +27,42 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+import contextlib
+import logging
+import logging.handlers
+
+
+@contextlib.contextmanager
+def _no_uri_warnings():
+    """Context manager that fails if rdflib emits URI warnings."""
+    rdflib_logger = logging.getLogger("rdflib.term")
+    handler = logging.handlers.MemoryHandler(capacity=100)
+
+    class _WarningCatcher(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.warnings = []
+
+        def emit(self, record):
+            if "does not look like a valid URI" in record.getMessage():
+                self.warnings.append(record.getMessage())
+
+    catcher = _WarningCatcher()
+    rdflib_logger.addHandler(catcher)
+    try:
+        yield catcher
+    finally:
+        rdflib_logger.removeHandler(catcher)
+        assert not catcher.warnings, (
+            f"Unexpected URI warnings:\n" + "\n".join(catcher.warnings)
+        )
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
@@ -322,6 +358,29 @@ class TestUnifiedGraph:
         ids = {r["id"] for r in results}
         assert "EXP-900" not in ids  # done
         assert "EXP-800" in ids  # in_progress
+
+    def test_related_with_spaces_no_uri_warning(self):
+        """Related values with spaces should become Literals, not broken URIs (#59)."""
+        import logging
+
+        item = _make_item(
+            "EXP-100", "Test item",
+            related=["EXP-200", "V12.4 education branch", "EXP-986 (Single Training Entry Point)"],
+            depends_on=["Phase-2D (Being Autonomy - proven working)"],
+        )
+        ug = UnifiedGraph()
+        # Capture any rdflib.term warnings
+        with pytest.raises(Exception) if False else _no_uri_warnings():
+            ug.add_item(item)
+        assert ug.get_item("EXP-100") is not None
+
+    def test_related_dict_values_handled(self):
+        """Related values that are dicts (not strings) should not crash (#59)."""
+        item = _make_item("EXP-101", "Dict related")
+        item.related = [{"id": "EXP-200", "note": "test"}]  # type: ignore
+        ug = UnifiedGraph()
+        ug.add_item(item)
+        assert ug.get_item("EXP-101") is not None
 
 
 # ---------------------------------------------------------------------------

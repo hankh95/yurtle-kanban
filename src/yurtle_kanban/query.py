@@ -40,12 +40,24 @@ ITEM = Namespace("https://yurtle.dev/kanban/item/")
 # ---------------------------------------------------------------------------
 
 
+_ITEM_ID_RE = re.compile(r"^[A-Za-z]+-[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*$")
+
+
 class UnifiedGraph:
     """Merge all per-file WorkItem graphs into a single queryable RDF graph.
 
     Also materializes frontmatter metadata (status, priority, assignee, tags,
     depends_on, related) as RDF triples so they can be queried with SPARQL.
     """
+
+    @staticmethod
+    def _ref_or_literal(value):
+        """Return an ITEM URI ref for valid IDs, or a Literal for free text."""
+        if not isinstance(value, str):
+            return Literal(str(value))
+        if _ITEM_ID_RE.match(value):
+            return ITEM[value]
+        return Literal(value)
 
     def __init__(self) -> None:
         self._graph = Graph()
@@ -93,15 +105,17 @@ class UnifiedGraph:
         for tag in item.tags or []:
             self._graph.add((item_uri, KB.tag, Literal(tag)))
 
-        # Relationships
+        # Relationships — only create URI refs for valid item IDs;
+        # free-text values (with spaces, parens) become Literals to avoid
+        # rdflib URI warnings (issue #59)
         for dep in item.depends_on or []:
-            self._graph.add((item_uri, KB.dependsOn, ITEM[dep]))
+            self._graph.add((item_uri, KB.dependsOn, self._ref_or_literal(dep)))
         for rel in item.related or []:
-            self._graph.add((item_uri, KB.related, ITEM[rel]))
+            self._graph.add((item_uri, KB.related, self._ref_or_literal(rel)))
         for blk in item.blocks or []:
-            self._graph.add((item_uri, KB.blocks, ITEM[blk]))
+            self._graph.add((item_uri, KB.blocks, self._ref_or_literal(blk)))
         for sup in item.superseded_by or []:
-            self._graph.add((item_uri, KB.supersededBy, ITEM[sup]))
+            self._graph.add((item_uri, KB.supersededBy, self._ref_or_literal(sup)))
 
         # Extended metadata
         if item.priority_rank is not None:
