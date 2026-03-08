@@ -281,6 +281,48 @@ class TestUnifiedGraph:
         ug.add_items(sample_items)
         assert ug.get_item("EXP-700") is not None
 
+    def test_sparql_auto_prepends_kb_prefix(self, unified_graph):
+        """SPARQL queries using kb: without PREFIX declaration should work."""
+        results = unified_graph.sparql(
+            "SELECT ?id WHERE { ?item kb:id ?id . ?item kb:status kb:in_progress . }"
+        )
+        ids = {r["id"] for r in results}
+        assert ids == {"EXP-800", "EXP-850"}
+
+    def test_sparql_auto_prepends_multiple_prefixes(self, unified_graph):
+        """SPARQL queries using kb: and xsd: without PREFIX should work."""
+        results = unified_graph.sparql(
+            "SELECT ?id WHERE { "
+            "  ?item kb:id ?id . "
+            "  ?item kb:numericId ?numId . "
+            "  FILTER(?numId > 900) "
+            "}"
+        )
+        ids = {r["id"] for r in results}
+        assert "EXP-1000" in ids
+        assert "EXP-800" not in ids
+
+    def test_sparql_with_explicit_prefix_not_duplicated(self, unified_graph):
+        """SPARQL queries that already declare PREFIX should not get duplicates."""
+        results = unified_graph.sparql(
+            "PREFIX kb: <https://yurtle.dev/kanban/> "
+            "SELECT ?id WHERE { ?item kb:id ?id . }"
+        )
+        assert len(results) > 0
+
+    def test_sparql_filter_without_prefix_does_not_crash(self, unified_graph):
+        """Reproduces #58: FILTER clause caused ParseException without PREFIX."""
+        results = unified_graph.sparql(
+            "SELECT ?id WHERE { "
+            "  ?item kb:id ?id . "
+            "  ?item kb:status ?status . "
+            "  FILTER(?status != kb:done) "
+            "}"
+        )
+        ids = {r["id"] for r in results}
+        assert "EXP-900" not in ids  # done
+        assert "EXP-800" in ids  # in_progress
+
 
 # ---------------------------------------------------------------------------
 # Phase 3: NLDecomposer
