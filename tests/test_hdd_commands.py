@@ -1156,6 +1156,38 @@ class TestExperimentRunService:
         with pytest.raises(FileNotFoundError):
             service.update_run_status(temp_repo / "nonexistent", "complete")
 
+    def test_create_experiment_run_dotted_id(self, temp_repo, hdd_config):
+        """create_experiment_run should accept dotted sub-IDs like EXPR-131.5."""
+        service = KanbanService(hdd_config, temp_repo)
+        run_path = service.create_experiment_run(
+            expr_id="EXPR-131.5",
+            being="test-being-v12",
+            run_by="TestAgent",
+        )
+        assert run_path.exists()
+        config = yaml.safe_load((run_path / "config.yaml").read_text())
+        assert config["experiment"] == "EXPR-131.5"
+
+    def test_get_experiment_runs_dotted_id(self, temp_repo, hdd_config):
+        """get_experiment_runs should accept dotted sub-IDs like EXPR-131.5."""
+        service = KanbanService(hdd_config, temp_repo)
+        service.create_experiment_run(
+            expr_id="EXPR-131.5",
+            being="test-being",
+            run_by="Agent",
+        )
+        runs = service.get_experiment_runs("EXPR-131.5")
+        assert len(runs) == 1
+
+    def test_create_experiment_run_rejects_path_traversal(self, temp_repo, hdd_config):
+        """create_experiment_run should reject IDs with path traversal."""
+        service = KanbanService(hdd_config, temp_repo)
+        with pytest.raises(ValueError, match="Invalid experiment ID format"):
+            service.create_experiment_run(
+                expr_id="../etc/passwd",
+                being="test-being",
+            )
+
     def test_get_experiment_runs_with_metrics(self, temp_repo, hdd_config):
         """Runs with metrics.json should include outcome in metadata."""
         import json

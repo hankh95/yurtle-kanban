@@ -137,8 +137,30 @@ class UnifiedGraph:
         for item in items:
             self.add_item(item)
 
+    # Standard prefixes auto-prepended when used but not declared
+    _STANDARD_PREFIXES = {
+        "kb:": "PREFIX kb: <https://yurtle.dev/kanban/>\n",
+        "item:": "PREFIX item: <https://yurtle.dev/kanban/item/>\n",
+        "xsd:": "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\n",
+    }
+
+    def _prepend_prefixes(self, query: str) -> str:
+        """Auto-prepend standard PREFIX declarations if used but not declared."""
+        upper = query.upper()
+        for prefix_usage, declaration in self._STANDARD_PREFIXES.items():
+            prefix_keyword = declaration.split(":")[0].split()[-1]  # e.g. "kb"
+            # Check if prefix is used in the query but not declared
+            if prefix_usage in query and f"PREFIX {prefix_keyword}:" not in upper:
+                query = declaration + query
+        return query
+
     def sparql(self, query: str) -> list[dict[str, str]]:
-        """Execute a SPARQL SELECT query and return results as list of dicts."""
+        """Execute a SPARQL SELECT query and return results as list of dicts.
+
+        Standard prefixes (kb:, item:, xsd:) are auto-prepended if used but
+        not declared in the query.
+        """
+        query = self._prepend_prefixes(query)
         results = []
         for row in self._graph.query(query):
             results.append({
@@ -149,6 +171,7 @@ class UnifiedGraph:
 
     def sparql_raw(self, query: str):
         """Execute a SPARQL query and return the raw rdflib result."""
+        query = self._prepend_prefixes(query)
         return self._graph.query(query)
 
     def get_item(self, item_id: str) -> WorkItem | None:

@@ -2649,10 +2649,11 @@ class KanbanService:
             Path to the created run folder.
         """
         # Validate expr_id to prevent path traversal
-        if not re.match(r"^[A-Za-z]+-[A-Za-z0-9]+$", expr_id):
+        # Allow dotted sub-IDs like EXPR-131.5 (common for sub-experiments)
+        if not re.match(r"^[A-Za-z]+-[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*$", expr_id):
             raise ValueError(
                 f"Invalid experiment ID format: {expr_id!r} — "
-                "expected PREFIX-ID (e.g., EXPR-130)"
+                "expected PREFIX-ID (e.g., EXPR-130 or EXPR-131.5)"
             )
 
         # Resolve run_by from git config if not provided
@@ -2711,10 +2712,11 @@ class KanbanService:
             outcome, run_by, params, run_path.
         """
         # Validate expr_id to prevent path traversal
-        if not re.match(r"^[A-Za-z]+-[A-Za-z0-9]+$", expr_id):
+        # Allow dotted sub-IDs like EXPR-131.5 (common for sub-experiments)
+        if not re.match(r"^[A-Za-z]+-[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*$", expr_id):
             raise ValueError(
                 f"Invalid experiment ID format: {expr_id!r} — "
-                "expected PREFIX-ID (e.g., EXPR-130)"
+                "expected PREFIX-ID (e.g., EXPR-130 or EXPR-131.5)"
             )
         runs_base = self.repo_root / "research" / "runs" / expr_id
         if not runs_base.exists():
