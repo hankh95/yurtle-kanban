@@ -2294,11 +2294,11 @@ class KanbanService:
             ttl_entry += '\n    kb:gatesSkipped "true"^^xsd:boolean ;'
         if closed_by:
             # Sanitize: reject characters that could break TTL string syntax
-            if re.search(r'[\n\r\\"]', closed_by):
+            if re.search(r'[\n\r\\" <>]', closed_by):
                 raise ValueError(
                     f"Invalid value for closed_by: contains disallowed characters: {closed_by!r}"
                 )
-            ttl_entry += f'\n    kb:closedBy "{closed_by}" ;'
+            ttl_entry += f'\n    kb:closedBy <{closed_by}> ;'
 
         # Check if yurtle block with status changes exists
         # Match block with prefix declarations and statusChange predicates
