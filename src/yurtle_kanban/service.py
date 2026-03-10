@@ -486,8 +486,10 @@ class KanbanService:
         # Scan items for this board only
         items = self._scan_board(board_config)
 
-        # Get columns from board's preset
+        # Get columns from board's preset, then apply WIP overrides
         columns = self._get_columns_from_preset(board_config.preset)
+        columns = self._apply_wip_overrides(columns, board_config)
+
         column_status_map = self._get_column_status_map()
 
         return Board(
@@ -578,6 +580,74 @@ class KanbanService:
             ]
 
         return sorted(columns, key=lambda c: c.order)
+
+    def _apply_wip_overrides(
+        self, columns: list[Column], board_config: BoardConfig
+    ) -> list[Column]:
+        """Apply board-level WIP limit overrides to columns.
+
+        Merges overrides from:
+        1. BoardConfig.wip_limits (YAML config)
+        2. Yurtle WIP policy file (.yurtle-kanban/wip-policy.md)
+
+        The Yurtle policy takes precedence over YAML config, which takes
+        precedence over theme defaults.
+        """
+        from .config import load_wip_policy
+
+        # Collect overrides: YAML first, then Yurtle on top
+        wip_overrides = board_config.wip_limits
+
+        # Board-level unlimited: clear all WIP limits
+        if wip_overrides is None:
+            for col in columns:
+                col.wip_limit = None
+                col.type_wip_limits = None
+            return columns
+
+        # Load Yurtle policy if available
+        config_dir = self.repo_root / ".yurtle-kanban"
+        yurtle_policy = load_wip_policy(config_dir)
+        if yurtle_policy and board_config.name in yurtle_policy:
+            board_policy = yurtle_policy[board_config.name]
+            if board_policy is None:
+                # Yurtle policy says this board is unlimited
+                for col in columns:
+                    col.wip_limit = None
+                    col.type_wip_limits = None
+                return columns
+            # Merge: Yurtle policy overrides YAML config
+            if wip_overrides is None:
+                wip_overrides = {}
+            merged = dict(wip_overrides)
+            merged.update(board_policy)
+            wip_overrides = merged
+
+        if not wip_overrides:
+            return columns
+
+        for col in columns:
+            if col.id not in wip_overrides:
+                continue
+
+            override = wip_overrides[col.id]
+
+            if override is None:
+                # Explicitly unlimited column
+                col.wip_limit = None
+                col.type_wip_limits = None
+            elif isinstance(override, int):
+                # Legacy aggregate limit
+                col.wip_limit = override
+            elif isinstance(override, dict):
+                # Per-type limits
+                col.type_wip_limits = {}
+                for type_name, limit in override.items():
+                    col.type_wip_limits[type_name] = limit
+                # Clear legacy limit when per-type is set
+                col.wip_limit = None
+
+        return columns
 
     def _get_column_status_map(self) -> dict[str, WorkItemStatus]:
         """Get mapping from column IDs to WorkItemStatus for themed columns.
@@ -1822,14 +1892,34 @@ class KanbanService:
                 if board_config:
                     board_name = board_config.name
             board = self.get_board(board_name=board_name)
+            item_type_str = item.item_type.value
             for col in board.columns:
                 if col.id == new_status.value:
-                    current_count = len(board.get_items_by_status(new_status))
-                    if col.wip_limit and current_count >= col.wip_limit:
-                        raise ValueError(
-                            f"WIP limit reached for {col.name} on {board.name} "
-                            f"({current_count}/{col.wip_limit})"
+                    if col.type_wip_limits is not None:
+                        # Per-type WIP check
+                        type_count = len(
+                            board.get_items_by_status_and_type(
+                                new_status, item.item_type
+                            )
                         )
+                        limit = col.get_wip_limit(item_type_str)
+                        if limit is not None and type_count >= limit:
+                            raise ValueError(
+                                f"WIP limit reached for {item_type_str}s "
+                                f"in {col.name} on {board.name} "
+                                f"({type_count}/{limit})"
+                            )
+                    else:
+                        # Legacy aggregate WIP check
+                        current_count = len(
+                            board.get_items_by_status(new_status)
+                        )
+                        if col.wip_limit and current_count >= col.wip_limit:
+                            raise ValueError(
+                                f"WIP limit reached for {col.name} on "
+                                f"{board.name} "
+                                f"({current_count}/{col.wip_limit})"
+                            )
 
         # Evaluate transition gates (unless skipped)
         gates_skipped = False

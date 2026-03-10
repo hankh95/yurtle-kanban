@@ -96,12 +96,33 @@ class Column:
     order: int
     wip_limit: int | None = None
     description: str | None = None
+    type_wip_limits: dict[str, int | None] | None = None
 
-    def is_over_wip(self, count: int) -> bool:
-        """Check if column is over WIP limit."""
-        if self.wip_limit is None:
+    def get_wip_limit(self, item_type: str | None = None) -> int | None:
+        """Get the effective WIP limit, optionally for a specific item type.
+
+        Resolution order:
+        1. Per-type limit if item_type given and type_wip_limits configured
+        2. _default in type_wip_limits if item_type not listed
+        3. Legacy wip_limit (applies to all types)
+
+        Returns None for unlimited.
+        """
+        if item_type and self.type_wip_limits is not None:
+            if item_type in self.type_wip_limits:
+                return self.type_wip_limits[item_type]
+            if "_default" in self.type_wip_limits:
+                return self.type_wip_limits["_default"]
+            # type_wip_limits configured but no match and no _default:
+            # fall through to legacy wip_limit
+        return self.wip_limit
+
+    def is_over_wip(self, count: int, item_type: str | None = None) -> bool:
+        """Check if column is over WIP limit, optionally for a specific type."""
+        limit = self.get_wip_limit(item_type)
+        if limit is None:
             return False
-        return count > self.wip_limit
+        return count > limit
 
 
 @dataclass
@@ -360,12 +381,47 @@ class Board:
             counts[col.id] = len(self.get_items_by_status(status))
         return counts
 
-    def get_wip_violations(self) -> list[tuple[Column, int]]:
-        """Get columns that are over WIP limit."""
-        violations = []
-        counts = self.get_column_counts()
+    def get_items_by_status_and_type(
+        self, status: WorkItemStatus, item_type: WorkItemType
+    ) -> list[WorkItem]:
+        """Get all items with a specific status and type."""
+        return [
+            item for item in self.items
+            if item.status == status and item.item_type == item_type
+        ]
+
+    def get_wip_violations(self) -> list[tuple[Column, int, str | None]]:
+        """Get columns that are over WIP limit.
+
+        Returns list of (column, count, item_type_or_none) tuples.
+        When per-type limits are configured, returns per-type violations.
+        When only aggregate limits exist, returns (col, count, None).
+        """
+        violations: list[tuple[Column, int, str | None]] = []
         for col in self.columns:
-            count = counts.get(col.id, 0)
-            if col.is_over_wip(count):
-                violations.append((col, count))
+            # Resolve column to status
+            if col.id in self.column_status_map:
+                status = self.column_status_map[col.id]
+            else:
+                try:
+                    status = WorkItemStatus.from_string(col.id)
+                except ValueError:
+                    continue
+
+            if col.type_wip_limits is not None:
+                # Check per-type limits
+                items_in_col = self.get_items_by_status(status)
+                type_counts: dict[str, int] = {}
+                for item in items_in_col:
+                    type_counts[item.item_type.value] = (
+                        type_counts.get(item.item_type.value, 0) + 1
+                    )
+                for type_name, type_count in type_counts.items():
+                    if col.is_over_wip(type_count, item_type=type_name):
+                        violations.append((col, type_count, type_name))
+            else:
+                # Aggregate check
+                count = len(self.get_items_by_status(status))
+                if col.is_over_wip(count):
+                    violations.append((col, count, None))
         return violations

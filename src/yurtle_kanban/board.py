@@ -78,7 +78,10 @@ def render_board(board: Board, console: Console | None = None) -> None:
     for col in board.columns:
         count = column_counts.get(col.id, 0)
         wip_str = ""
-        if col.wip_limit:
+        if col.type_wip_limits is not None:
+            # Per-type limits: show aggregate count only
+            wip_str = f" ({count})"
+        elif col.wip_limit:
             if count > col.wip_limit:
                 wip_str = f" [red]({count}/{col.wip_limit})[/red]"
             else:
@@ -119,8 +122,16 @@ def render_board(board: Board, console: Console | None = None) -> None:
     if violations:
         console.print()
         console.print("[bold red]WIP Limit Violations:[/bold red]")
-        for col, count in violations:
-            console.print(f"  - {col.name}: {count}/{col.wip_limit}")
+        for col, count, item_type in violations:
+            if item_type:
+                limit = col.get_wip_limit(item_type)
+                console.print(
+                    f"  - {col.name} ({item_type}): {count}/{limit}"
+                )
+            else:
+                console.print(
+                    f"  - {col.name}: {count}/{col.wip_limit}"
+                )
 
     console.print()
 
