@@ -8,6 +8,7 @@ Provides export to:
 """
 
 import json
+from collections import Counter
 from datetime import datetime
 from html import escape as html_escape
 from typing import Any
@@ -34,7 +35,18 @@ def export_html(board: Board) -> str:
 
         wip_class = ""
         wip_badge = ""
-        if col.wip_limit:
+        if col.type_wip_limits is not None:
+            # Per-type WIP: check each type independently
+            type_counts = Counter(item.item_type.value for item in items)
+            any_exceeded = any(
+                col.is_over_wip(type_counts[t], item_type=t)
+                for t in type_counts
+            )
+            if any_exceeded:
+                wip_class = "wip-exceeded"
+            # Show aggregate count only in badge
+            wip_badge = f'<span class="wip-badge">{len(items)}</span>'
+        elif col.wip_limit:
             if len(items) > col.wip_limit:
                 wip_class = "wip-exceeded"
             wip_badge = f'<span class="wip-badge">{len(items)}/{col.wip_limit}</span>'
@@ -678,14 +690,15 @@ def export_json(board: Board) -> str:
 
     # Add columns
     for col in board.columns:
-        data["columns"].append(
-            {
-                "id": col.id,
-                "name": col.name,
-                "order": col.order,
-                "wip_limit": col.wip_limit,
-            }
-        )
+        col_data: dict[str, Any] = {
+            "id": col.id,
+            "name": col.name,
+            "order": col.order,
+            "wip_limit": col.wip_limit,
+        }
+        if col.type_wip_limits is not None:
+            col_data["type_wip_limits"] = col.type_wip_limits
+        data["columns"].append(col_data)
 
     # Add items
     for item in board.items:

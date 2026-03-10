@@ -77,13 +77,22 @@ class PathConfig:
 
 @dataclass
 class BoardConfig:
-    """Configuration for a single board in multi-board setup."""
+    """Configuration for a single board in multi-board setup.
+
+    wip_limits supports three formats:
+    - None: no WIP limits on this board
+    - {"column": int}: legacy aggregate limit for all types in column
+    - {"column": {"type": int|None, "_default": int}}: per-type limits
+      (None = unlimited for that type)
+    """
 
     name: str
     preset: str = "software"
     path: str = "work/"
     scan_paths: list[str] = field(default_factory=list)
-    wip_limits: dict[str, int] = field(default_factory=dict)
+    wip_limits: dict[str, int | dict[str, int | None] | None] | None = field(
+        default_factory=dict
+    )
     gates: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     ignore: list[str] = field(default_factory=lambda: ["**/archive/**", "**/templates/**"])
 
@@ -97,13 +106,23 @@ class BoardConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BoardConfig":
-        """Create BoardConfig from dictionary."""
+        """Create BoardConfig from dictionary.
+
+        wip_limits can be:
+        - missing/empty dict: no overrides (use theme defaults)
+        - null: explicitly disable all WIP limits on this board
+        - dict with int values: legacy aggregate limits
+        - dict with dict values: per-type limits
+        """
+        raw_wip = data.get("wip_limits", {})
+        # Preserve None (explicitly unlimited board)
+        wip_limits = raw_wip if raw_wip is not None else None
         return cls(
             name=data.get("name", "default"),
             preset=data.get("preset", "software"),
             path=data.get("path", "work/"),
             scan_paths=data.get("scan_paths", []),
-            wip_limits=data.get("wip_limits", {}),
+            wip_limits=wip_limits,
             gates=data.get("gates", {}),
             ignore=data.get("ignore", ["**/archive/**", "**/templates/**"]),
         )
@@ -117,7 +136,9 @@ class BoardConfig:
         }
         if self.scan_paths:
             result["scan_paths"] = self.scan_paths
-        if self.wip_limits:
+        # Serialize wip_limits: None means "explicitly unlimited" (must be preserved),
+        # empty dict {} means "no overrides" (omit for cleaner output)
+        if self.wip_limits is None or self.wip_limits:
             result["wip_limits"] = self.wip_limits
         if self.gates:
             result["gates"] = self.gates
@@ -360,3 +381,153 @@ class KanbanConfig:
             return None
 
         return _load_builtin_theme(self.theme)
+
+
+# ---------------------------------------------------------------------------
+# Yurtle WIP Policy Loader
+# ---------------------------------------------------------------------------
+
+# RDF namespace constants for WIP policy triples
+WIP_NS = "https://yurtle.dev/kanban/wip/"
+
+
+def load_wip_policy(config_dir: Path) -> dict[str, dict[str, int | dict[str, int | None] | None]] | None:
+    """Load WIP policy from a Yurtle file (.yurtle-kanban/wip-policy.md).
+
+    The Yurtle file defines WIP limits as RDF triples, making them
+    graph-queryable. Format:
+
+        ```turtle
+        @prefix wip: <https://yurtle.dev/kanban/wip/> .
+        @prefix kb: <https://yurtle.dev/kanban/> .
+        @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+        <#development> a wip:Policy ;
+            wip:board "development" ;
+            wip:unlimited "false"^^xsd:boolean .
+
+        <#dev-underway-expedition> a wip:TypeLimit ;
+            wip:policy <#development> ;
+            wip:column "in_progress" ;
+            wip:itemType "expedition" ;
+            wip:limit 5 .
+
+        <#dev-underway-chore> a wip:TypeLimit ;
+            wip:policy <#development> ;
+            wip:column "in_progress" ;
+            wip:itemType "chore" ;
+            wip:unlimited "true"^^xsd:boolean .
+        ```
+
+    Returns:
+        Dict mapping board_name -> wip_limits dict (same shape as
+        BoardConfig.wip_limits), or None if no policy file exists.
+    """
+    policy_path = config_dir / "wip-policy.md"
+    if not policy_path.exists():
+        return None
+
+    try:
+        from rdflib import Graph as RDFGraph, Namespace
+
+        g = RDFGraph()
+        # Try yurtle-rdflib parser first, fall back to parsing turtle blocks
+        try:
+            g.parse(str(policy_path), format="yurtle")
+        except Exception:
+            # Fall back: extract turtle fenced blocks and parse
+            _parse_turtle_blocks(g, policy_path)
+
+        if len(g) == 0:
+            return None
+
+        wip = Namespace(WIP_NS)
+
+        result: dict[str, dict[str, int | dict[str, int | None] | None]] = {}
+
+        # Find all wip:Policy subjects
+        for policy_node in g.subjects(predicate=None, object=wip.Policy):
+            board_name = str(g.value(policy_node, wip.board) or "default")
+            board_unlimited = g.value(policy_node, wip.unlimited)
+            if board_unlimited and str(board_unlimited).lower() == "true":
+                result[board_name] = None  # type: ignore[assignment]
+                continue
+            result[board_name] = {}
+
+        # Find all wip:TypeLimit subjects
+        for limit_node in g.subjects(predicate=None, object=wip.TypeLimit):
+            policy_ref = g.value(limit_node, wip.policy)
+            # Resolve board name from policy ref
+            board_name = "default"
+            if policy_ref:
+                board_val = g.value(policy_ref, wip.board)
+                if board_val:
+                    board_name = str(board_val)
+
+            if board_name not in result or result[board_name] is None:
+                continue
+
+            column = str(g.value(limit_node, wip.column) or "")
+            item_type = str(g.value(limit_node, wip.itemType) or "")
+            limit_val = g.value(limit_node, wip.limit)
+            unlimited = g.value(limit_node, wip.unlimited)
+
+            if not column or not item_type:
+                continue
+
+            board_wip = result[board_name]
+            if not isinstance(board_wip, dict):
+                continue
+
+            # Initialize column entry as dict if needed
+            if column not in board_wip:
+                board_wip[column] = {}
+            col_entry = board_wip[column]
+            if isinstance(col_entry, int):
+                # Upgrade from legacy int to dict
+                col_entry = {"_default": col_entry}
+                board_wip[column] = col_entry
+
+            if unlimited and str(unlimited).lower() == "true":
+                col_entry[item_type] = None  # type: ignore[index]
+            elif limit_val is not None:
+                col_entry[item_type] = int(limit_val)  # type: ignore[index]
+
+        # Find aggregate wip:ColumnLimit subjects (legacy-style per-column limits)
+        for limit_node in g.subjects(predicate=None, object=wip.ColumnLimit):
+            policy_ref = g.value(limit_node, wip.policy)
+            board_name = "default"
+            if policy_ref:
+                board_val = g.value(policy_ref, wip.board)
+                if board_val:
+                    board_name = str(board_val)
+
+            if board_name not in result or result[board_name] is None:
+                continue
+
+            column = str(g.value(limit_node, wip.column) or "")
+            limit_val = g.value(limit_node, wip.limit)
+
+            if column and limit_val is not None:
+                board_wip = result[board_name]
+                if not isinstance(board_wip, dict):
+                    continue
+                if column not in board_wip:
+                    board_wip[column] = int(limit_val)
+
+        return result if result else None
+
+    except ImportError:
+        return None
+
+
+def _parse_turtle_blocks(g: Any, md_path: Path) -> None:
+    """Extract and parse turtle fenced code blocks from a markdown file."""
+    content = md_path.read_text()
+    import re
+    blocks = re.findall(r"```turtle\s*\n(.*?)```", content, re.DOTALL)
+    for block in blocks:
+        try:
+            g.parse(data=block, format="turtle")
+        except Exception:
+            continue
