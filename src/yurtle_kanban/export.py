@@ -8,6 +8,7 @@ Provides export to:
 """
 
 import json
+from collections import Counter
 from datetime import datetime
 from html import escape as html_escape
 from typing import Any
@@ -36,7 +37,6 @@ def export_html(board: Board) -> str:
         wip_badge = ""
         if col.type_wip_limits is not None:
             # Per-type WIP: check each type independently
-            from collections import Counter
             type_counts = Counter(item.item_type.value for item in items)
             any_exceeded = any(
                 col.is_over_wip(type_counts[t], item_type=t)

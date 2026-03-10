@@ -11,10 +11,7 @@ Tests cover:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -481,3 +478,153 @@ class TestServiceApplyWIPOverrides:
 
         review_col = next(c for c in result if c.id == "review")
         assert review_col.wip_limit == 10  # theme default preserved
+
+
+# ---------------------------------------------------------------------------
+# End-to-end move_item tests
+# ---------------------------------------------------------------------------
+
+
+class TestMoveItemPerTypeWIP:
+    """End-to-end test: move_item blocks on per-type WIP limits."""
+
+    @pytest.fixture
+    def per_type_repo(self, tmp_path):
+        """Set up a repo with per-type WIP limits and items at the limit."""
+        import subprocess
+
+        subprocess.run(
+            ["git", "init", "-b", "main"], cwd=tmp_path,
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=tmp_path, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=tmp_path, capture_output=True, check=True,
+        )
+
+        # Create dirs
+        (tmp_path / ".kanban").mkdir()
+        (tmp_path / "kanban-work" / "expeditions").mkdir(parents=True)
+        (tmp_path / "kanban-work" / "chores").mkdir(parents=True)
+
+        # Write v2 config with per-type WIP: 2 expeditions max in_progress
+        import yaml
+        config = {
+            "version": "2.0",
+            "boards": [{
+                "name": "development",
+                "preset": "nautical",
+                "path": "kanban-work/",
+                "scan_paths": [
+                    "kanban-work/expeditions/",
+                    "kanban-work/chores/",
+                ],
+                "wip_limits": {
+                    "in_progress": {
+                        "expedition": 2,
+                        "chore": None,
+                    },
+                },
+            }],
+            "default_board": "development",
+        }
+        (tmp_path / ".kanban" / "config.yaml").write_text(yaml.dump(config))
+
+        # Create 2 expeditions already in_progress (at limit)
+        for i in range(1, 3):
+            (tmp_path / "kanban-work" / "expeditions" / f"EXP-{i}.md").write_text(
+                f"---\nid: EXP-{i}\ntitle: Test {i}\ntype: expedition\n"
+                f"status: in_progress\n---\n\n# Test {i}\n"
+            )
+        # Create 1 expedition in backlog (candidate to move)
+        (tmp_path / "kanban-work" / "expeditions" / "EXP-3.md").write_text(
+            "---\nid: EXP-3\ntitle: Test 3\ntype: expedition\n"
+            "status: backlog\n---\n\n# Test 3\n"
+        )
+        # Create 1 chore in backlog (should NOT be blocked)
+        (tmp_path / "kanban-work" / "chores" / "CHORE-1.md").write_text(
+            "---\nid: CHORE-1\ntitle: Cleanup\ntype: chore\n"
+            "status: backlog\n---\n\n# Cleanup\n"
+        )
+
+        # Initial commit
+        subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"],
+            cwd=tmp_path, capture_output=True,
+        )
+
+        return tmp_path
+
+    def _make_service(self, repo_root):
+        from yurtle_kanban.service import KanbanService
+
+        config = KanbanConfig.load(repo_root / ".kanban" / "config.yaml")
+        return KanbanService(config=config, repo_root=repo_root)
+
+    def test_move_expedition_blocked_by_per_type_limit(self, per_type_repo):
+        """Moving a 3rd expedition to in_progress should be blocked."""
+        service = self._make_service(per_type_repo)
+
+        with pytest.raises(ValueError, match="WIP limit reached for expeditions"):
+            service.move_item(
+                "EXP-3",
+                WorkItemStatus.IN_PROGRESS,
+                commit=False,
+                validate_workflow=False,
+            )
+
+    def test_move_chore_allowed_despite_expedition_limit(self, per_type_repo):
+        """Moving a chore should succeed even when expedition limit is hit."""
+        service = self._make_service(per_type_repo)
+
+        # Chore type is unlimited — should not be blocked
+        item = service.move_item(
+            "CHORE-1",
+            WorkItemStatus.IN_PROGRESS,
+            commit=False,
+            validate_workflow=False,
+        )
+        assert item.status == WorkItemStatus.IN_PROGRESS
+
+    def test_force_bypasses_per_type_limit(self, per_type_repo):
+        """--force (skip_wip_check=True) should bypass per-type limits."""
+        service = self._make_service(per_type_repo)
+
+        item = service.move_item(
+            "EXP-3",
+            WorkItemStatus.IN_PROGRESS,
+            commit=False,
+            validate_workflow=False,
+            skip_wip_check=True,
+        )
+        assert item.status == WorkItemStatus.IN_PROGRESS
+
+
+class TestBoardConfigRoundtrip:
+    """Test that BoardConfig with per-type WIP survives save/load."""
+
+    def test_null_wip_limits_roundtrip(self, tmp_path):
+        """wip_limits=None (unlimited) survives to_dict → from_dict."""
+        bc = BoardConfig(name="research", wip_limits=None)
+        d = bc.to_dict()
+        assert "wip_limits" in d
+        assert d["wip_limits"] is None
+
+        restored = BoardConfig.from_dict(d)
+        assert restored.wip_limits is None
+
+    def test_per_type_wip_limits_roundtrip(self):
+        """Per-type dict wip_limits survives to_dict → from_dict."""
+        bc = BoardConfig(
+            name="dev",
+            wip_limits={"in_progress": {"expedition": 5, "chore": None}},
+        )
+        d = bc.to_dict()
+        restored = BoardConfig.from_dict(d)
+        assert restored.wip_limits["in_progress"]["expedition"] == 5
+        assert restored.wip_limits["in_progress"]["chore"] is None

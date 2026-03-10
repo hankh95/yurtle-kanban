@@ -136,7 +136,9 @@ class BoardConfig:
         }
         if self.scan_paths:
             result["scan_paths"] = self.scan_paths
-        if self.wip_limits:
+        # Serialize wip_limits: None means "explicitly unlimited" (must be preserved),
+        # empty dict {} means "no overrides" (omit for cleaner output)
+        if self.wip_limits is None or self.wip_limits:
             result["wip_limits"] = self.wip_limits
         if self.gates:
             result["gates"] = self.gates
@@ -387,7 +389,6 @@ class KanbanConfig:
 
 # RDF namespace constants for WIP policy triples
 WIP_NS = "https://yurtle.dev/kanban/wip/"
-KB_NS = "https://yurtle.dev/kanban/"
 
 
 def load_wip_policy(config_dir: Path) -> dict[str, dict[str, int | dict[str, int | None] | None]] | None:
@@ -427,7 +428,7 @@ def load_wip_policy(config_dir: Path) -> dict[str, dict[str, int | dict[str, int
         return None
 
     try:
-        from rdflib import Graph as RDFGraph, Namespace, Literal
+        from rdflib import Graph as RDFGraph, Namespace
 
         g = RDFGraph()
         # Try yurtle-rdflib parser first, fall back to parsing turtle blocks
@@ -475,7 +476,8 @@ def load_wip_policy(config_dir: Path) -> dict[str, dict[str, int | dict[str, int
                 continue
 
             board_wip = result[board_name]
-            assert isinstance(board_wip, dict)
+            if not isinstance(board_wip, dict):
+                continue
 
             # Initialize column entry as dict if needed
             if column not in board_wip:
@@ -508,7 +510,8 @@ def load_wip_policy(config_dir: Path) -> dict[str, dict[str, int | dict[str, int
 
             if column and limit_val is not None:
                 board_wip = result[board_name]
-                assert isinstance(board_wip, dict)
+                if not isinstance(board_wip, dict):
+                    continue
                 if column not in board_wip:
                     board_wip[column] = int(limit_val)
 

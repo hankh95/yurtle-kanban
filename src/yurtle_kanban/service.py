@@ -617,8 +617,6 @@ class KanbanService:
                     col.type_wip_limits = None
                 return columns
             # Merge: Yurtle policy overrides YAML config
-            if wip_overrides is None:
-                wip_overrides = {}
             merged = dict(wip_overrides)
             merged.update(board_policy)
             wip_overrides = merged
