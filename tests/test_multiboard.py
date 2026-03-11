@@ -13,6 +13,7 @@ from yurtle_kanban.config import (
     KanbanConfig,
     PathConfig,
 )
+from yurtle_kanban.models import WorkItemStatus, WorkItemType
 from yurtle_kanban.service import KanbanService
 
 
@@ -1125,3 +1126,130 @@ status: backlog
         assert "active" in transitions["draft"]
         assert "abandoned" in transitions["draft"]
         assert "complete" in transitions["active"]
+
+
+class TestWipExemptTypes:
+    """CHORE-137: Voyages (and other exempt types) should not count against WIP.
+
+    Without wip_exempt_types, voyages occupy WIP slots even though they are
+    containers, not work items. With wip_exempt_types: [voyage], moving a
+    voyage to in_progress must not count toward the limit.
+    """
+
+    @pytest.fixture
+    def wip_repo(self, tmp_path):
+        """Multi-board repo with voyage exempt and wip_limit=2 on in_progress."""
+        import subprocess
+
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, capture_output=True, check=True)
+
+        config_path = tmp_path / ".kanban" / "config.yaml"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text("""
+version: "2.0"
+boards:
+  - name: development
+    preset: nautical
+    path: kanban-work/
+    wip_exempt_types:
+      - voyage
+    wip_limits:
+      in_progress: 2
+default_board: development
+""")
+        (tmp_path / "kanban-work" / "expeditions").mkdir(parents=True)
+        (tmp_path / "kanban-work" / "voyages").mkdir(parents=True)
+        (tmp_path / "kanban-work" / "chores").mkdir(parents=True)
+        (tmp_path / ".kanban").mkdir(exist_ok=True)
+
+        config = KanbanConfig.load(config_path)
+        service = KanbanService(config, tmp_path)
+        return {"tmp_path": tmp_path, "config": config, "service": service}
+
+    def test_voyage_exempt_from_wip(self, wip_repo):
+        """Voyages don't count toward WIP — moving them in-progress is always allowed."""
+        svc = wip_repo["service"]
+
+        # Fill up the WIP limit with 2 expeditions
+        exp1 = svc.create_item(WorkItemType.EXPEDITION, "Expedition One",
+                               assignee="Agent", description="desc")
+        exp2 = svc.create_item(WorkItemType.EXPEDITION, "Expedition Two",
+                               assignee="Agent", description="desc")
+        svc.move_item(exp1.id, WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=False)
+        svc.move_item(exp2.id, WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=False)
+
+        # A voyage should still be moveable — it's exempt
+        voy = svc.create_item(WorkItemType.VOYAGE, "Big Initiative")
+        svc.move_item(voy.id, WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=False)
+
+        board = svc.get_board()
+        in_progress = board.get_items_by_status(WorkItemStatus.IN_PROGRESS)
+        assert any(i.id == voy.id for i in in_progress)
+
+    def test_expedition_blocked_at_wip_limit(self, wip_repo):
+        """Non-exempt types are still blocked when WIP limit is reached."""
+        svc = wip_repo["service"]
+
+        exp1 = svc.create_item(WorkItemType.EXPEDITION, "Expedition One",
+                               assignee="Agent", description="desc")
+        exp2 = svc.create_item(WorkItemType.EXPEDITION, "Expedition Two",
+                               assignee="Agent", description="desc")
+        svc.move_item(exp1.id, WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=False)
+        svc.move_item(exp2.id, WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=False)
+
+        exp3 = svc.create_item(WorkItemType.EXPEDITION, "Expedition Three",
+                               assignee="Agent", description="desc")
+        with pytest.raises(ValueError, match="WIP limit reached"):
+            svc.move_item(exp3.id, WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=False)
+
+    def test_voyage_does_not_consume_wip_slot_for_expeditions(self, wip_repo):
+        """A voyage in-progress must not block a subsequent expedition."""
+        svc = wip_repo["service"]
+
+        # Add a voyage first (exempt — doesn't consume a slot)
+        voy = svc.create_item(WorkItemType.VOYAGE, "Campaign")
+        svc.move_item(voy.id, WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=False)
+
+        # Should still be able to add 2 expeditions (the full limit)
+        exp1 = svc.create_item(WorkItemType.EXPEDITION, "Expedition One",
+                               assignee="Agent", description="desc")
+        exp2 = svc.create_item(WorkItemType.EXPEDITION, "Expedition Two",
+                               assignee="Agent", description="desc")
+        svc.move_item(exp1.id, WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=False)
+        svc.move_item(exp2.id, WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=False)
+
+        # Third expedition should be blocked
+        exp3 = svc.create_item(WorkItemType.EXPEDITION, "Expedition Three",
+                               assignee="Agent", description="desc")
+        with pytest.raises(ValueError, match="WIP limit reached"):
+            svc.move_item(exp3.id, WorkItemStatus.IN_PROGRESS, commit=False, validate_workflow=False)
+
+    def test_wip_exempt_types_from_config_roundtrip(self):
+        """BoardConfig.wip_exempt_types roundtrips through from_dict/to_dict."""
+        data = {
+            "name": "development",
+            "preset": "nautical",
+            "path": "kanban-work/",
+            "wip_exempt_types": ["voyage", "chore"],
+        }
+        board = BoardConfig.from_dict(data)
+        assert board.wip_exempt_types == ["voyage", "chore"]
+
+        out = board.to_dict()
+        assert out["wip_exempt_types"] == ["voyage", "chore"]
+
+    def test_wip_exempt_types_default_empty(self):
+        """BoardConfig.wip_exempt_types defaults to empty list."""
+        board = BoardConfig(name="dev")
+        assert board.wip_exempt_types == []
+
+    def test_wip_limits_override_theme_default(self, wip_repo):
+        """board_config.wip_limits overrides the theme's column wip_limit."""
+        svc = wip_repo["service"]
+        board = svc.get_board()
+
+        # Theme (nautical) has in_progress wip_limit=10, but config overrides to 2
+        in_progress_col = next(c for c in board.columns if c.id == "in_progress")
+        assert in_progress_col.wip_limit == 2

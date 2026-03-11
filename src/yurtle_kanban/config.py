@@ -93,6 +93,7 @@ class BoardConfig:
     wip_limits: dict[str, int | dict[str, int | None] | None] | None = field(
         default_factory=dict
     )
+    wip_exempt_types: list[str] = field(default_factory=list)
     gates: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     ignore: list[str] = field(default_factory=lambda: ["**/archive/**", "**/templates/**"])
 
@@ -123,6 +124,7 @@ class BoardConfig:
             path=data.get("path", "work/"),
             scan_paths=data.get("scan_paths", []),
             wip_limits=wip_limits,
+            wip_exempt_types=data.get("wip_exempt_types", []),
             gates=data.get("gates", {}),
             ignore=data.get("ignore", ["**/archive/**", "**/templates/**"]),
         )
@@ -140,6 +142,8 @@ class BoardConfig:
         # empty dict {} means "no overrides" (omit for cleaner output)
         if self.wip_limits is None or self.wip_limits:
             result["wip_limits"] = self.wip_limits
+        if self.wip_exempt_types:
+            result["wip_exempt_types"] = self.wip_exempt_types
         if self.gates:
             result["gates"] = self.gates
         if self.ignore != ["**/archive/**", "**/templates/**"]:

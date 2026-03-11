@@ -490,6 +490,7 @@ class KanbanService:
         columns = self._get_columns_from_preset(board_config.preset)
         columns = self._apply_wip_overrides(columns, board_config)
 
+
         column_status_map = self._get_column_status_map()
 
         return Board(
@@ -544,11 +545,18 @@ class KanbanService:
                 return True
         return False
 
-    def _get_columns_from_preset(self, preset: str) -> list[Column]:
+    def _get_columns_from_preset(
+        self,
+        preset: str,
+        wip_limit_overrides: dict[str, int] | None = None,
+    ) -> list[Column]:
         """Get column definitions from a preset/theme.
 
         Args:
             preset: Name of the preset (e.g., 'software', 'nautical', 'hdd')
+            wip_limit_overrides: Optional per-column WIP limit overrides from
+                board config. Keys are column IDs (e.g., 'in_progress',
+                'underway'). Overrides the theme's default wip_limit values.
 
         Returns:
             List of Column objects
@@ -556,16 +564,29 @@ class KanbanService:
         from .config import _load_builtin_theme
 
         theme = _load_builtin_theme(preset, self.repo_root)
+        overrides = wip_limit_overrides or {}
         columns = []
 
         if theme and "columns" in theme:
+            status_map = self._get_column_status_map()
             for col_id, col_def in theme["columns"].items():
+                # Apply override: check col_id directly, then its display name
+                wip_limit = col_def.get("wip_limit")
+                if col_id in overrides:
+                    wip_limit = overrides[col_id]
+                else:
+                    # Also check the mapped status value (e.g. "underway" maps
+                    # to WorkItemStatus.IN_PROGRESS whose value is "in_progress")
+                    for override_key, override_val in overrides.items():
+                        if override_key == col_def.get("name", "").lower().replace(" ", "_"):
+                            wip_limit = override_val
+                            break
                 columns.append(
                     Column(
                         id=col_id,
                         name=col_def.get("name", col_id.title()),
                         order=col_def.get("order", 0),
-                        wip_limit=col_def.get("wip_limit"),
+                        wip_limit=wip_limit,
                         description=col_def.get("description"),
                     )
                 )
@@ -574,7 +595,7 @@ class KanbanService:
             columns = [
                 Column(id="backlog", name="Backlog", order=1),
                 Column(id="ready", name="Ready", order=2),
-                Column(id="in_progress", name="In Progress", order=3, wip_limit=3),
+                Column(id="in_progress", name="In Progress", order=3, wip_limit=overrides.get("in_progress", 3)),
                 Column(id="review", name="Review", order=4),
                 Column(id="done", name="Done", order=5),
             ]
@@ -1883,6 +1904,7 @@ class KanbanService:
         if not skip_wip_check:
             # Determine which board this item belongs to
             board_name = None
+            board_config = None
             if self.config.is_multi_board and item.file_path:
                 board_config = self.config.get_board_for_path(
                     item.file_path, self.repo_root
@@ -1890,34 +1912,41 @@ class KanbanService:
                 if board_config:
                     board_name = board_config.name
             board = self.get_board(board_name=board_name)
+            exempt_types = set(board_config.wip_exempt_types) if board_config else set()
             item_type_str = item.item_type.value
-            for col in board.columns:
-                if col.id == new_status.value:
-                    if col.type_wip_limits is not None:
-                        # Per-type WIP check
-                        type_count = len(
-                            board.get_items_by_status_and_type(
-                                new_status, item.item_type
+            # If the item being moved is itself exempt, skip WIP check entirely
+            if item_type_str not in exempt_types:
+                for col in board.columns:
+                    if col.id == new_status.value:
+                        if col.type_wip_limits is not None:
+                            # Per-type WIP check
+                            type_count = len(
+                                board.get_items_by_status_and_type(
+                                    new_status, item.item_type
+                                )
                             )
-                        )
-                        limit = col.get_wip_limit(item_type_str)
-                        if limit is not None and type_count >= limit:
-                            raise ValueError(
-                                f"WIP limit reached for {item_type_str}s "
-                                f"in {col.name} on {board.name} "
-                                f"({type_count}/{limit})"
-                            )
-                    else:
-                        # Legacy aggregate WIP check
-                        current_count = len(
-                            board.get_items_by_status(new_status)
-                        )
-                        if col.wip_limit and current_count >= col.wip_limit:
-                            raise ValueError(
-                                f"WIP limit reached for {col.name} on "
-                                f"{board.name} "
-                                f"({current_count}/{col.wip_limit})"
-                            )
+                            limit = col.get_wip_limit(item_type_str)
+                            if limit is not None and type_count >= limit:
+                                raise ValueError(
+                                    f"WIP limit reached for {item_type_str}s "
+                                    f"in {col.name} on {board.name} "
+                                    f"({type_count}/{limit})"
+                                )
+                        else:
+                            # Aggregate WIP check — exclude exempt types from count
+                            items_in_status = board.get_items_by_status(new_status)
+                            if exempt_types:
+                                items_in_status = [
+                                    i for i in items_in_status
+                                    if i.item_type.value not in exempt_types
+                                ]
+                            current_count = len(items_in_status)
+                            if col.wip_limit and current_count >= col.wip_limit:
+                                raise ValueError(
+                                    f"WIP limit reached for {col.name} on "
+                                    f"{board.name} "
+                                    f"({current_count}/{col.wip_limit})"
+                                )
 
         # Evaluate transition gates (unless skipped)
         gates_skipped = False
